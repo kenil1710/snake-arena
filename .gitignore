@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+
+# Builds
+.next/
+dist/
+.turbo/
+*.tsbuildinfo
+
+# Foundry
+contracts/out/
+contracts/cache/
+contracts/broadcast/
+
+# Env — never commit secrets
+.env
+.env.local
+.env*.local
+
+# Misc
+.DS_Store
