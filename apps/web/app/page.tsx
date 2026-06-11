@@ -13,6 +13,7 @@ import {
 import { StatsBanner } from '@/components/StatsBanner';
 import { TournamentCard } from '@/components/TournamentCard';
 import { EntryFlow } from '@/components/EntryFlow';
+import { NetworkGuard } from '@/components/NetworkGuard';
 
 const REFETCH_MS = 10_000;
 
@@ -84,6 +85,7 @@ export default function LobbyPage() {
 
   return (
     <main className="bg-grid">
+      <NetworkGuard>
       <div className="mx-auto flex min-h-[calc(100vh-3.5rem)] w-full max-w-5xl flex-col gap-6 px-4 py-8">
         <section>
           <h1 className="text-2xl font-semibold tracking-tight">Tournaments</h1>
@@ -128,6 +130,7 @@ export default function LobbyPage() {
           onClose={() => setEntryTarget(null)}
         />
       )}
+      </NetworkGuard>
     </main>
   );
 }

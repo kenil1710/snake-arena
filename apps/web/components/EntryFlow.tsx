@@ -6,6 +6,7 @@ import { erc20Abi } from 'viem';
 import {
   useAccount,
   useReadContracts,
+  useSwitchChain,
   useWaitForTransactionReceipt,
   useWriteContract,
 } from 'wagmi';
@@ -21,6 +22,7 @@ import {
   type TournamentTierId,
 } from '@/lib/contracts';
 import { errorMessage, formatUsdc } from '@/lib/format';
+import { TARGET_CHAIN_ID, TARGET_CHAIN_NAME } from '@/lib/wagmi';
 import { Modal } from './ui/Modal';
 
 const USERNAME_PATTERN = /^[a-zA-Z0-9]{1,20}$/;
@@ -74,12 +76,32 @@ function Spinner() {
 
 export function EntryFlow({ tierId, tournament, onClose }: EntryFlowProps) {
   const router = useRouter();
-  const { address, isConnected } = useAccount();
+  const { address, isConnected, chainId: walletChainId } = useAccount();
   const config = TOURNAMENT_TIERS[tierId];
   const fee = tournament.entryFee;
 
   const [usernameInput, setUsernameInput] = useState('');
   const [usernameConfirmed, setUsernameConfirmed] = useState(false);
+  const [switchRejected, setSwitchRejected] = useState(false);
+
+  const { switchChainAsync, isPending: switching } = useSwitchChain();
+
+  /**
+   * A wallet on the wrong chain mis-simulates our calldata (phantom "deposit
+   * more ETH" / fraud warnings), so every tx is gated on a completed switch.
+   */
+  const withCorrectChain = async (sendTransaction: () => void) => {
+    if (walletChainId !== TARGET_CHAIN_ID) {
+      try {
+        await switchChainAsync({ chainId: TARGET_CHAIN_ID });
+      } catch {
+        setSwitchRejected(true);
+        return;
+      }
+    }
+    setSwitchRejected(false);
+    sendTransaction();
+  };
 
   const reads = useReadContracts({
     contracts: address
@@ -112,12 +134,19 @@ export function EntryFlow({ tierId, tournament, onClose }: EntryFlowProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [approveReceipt.isSuccess]);
 
-  // Entry confirmed — hand off to the play page (placeholder until Phase 5).
+  // Entry confirmed — hand off to the play page with the entry tx hash, which
+  // the game server needs to verify the paid entry before starting a session.
   useEffect(() => {
-    if (!enterReceipt.isSuccess) return;
-    const timer = setTimeout(() => router.push(`/play/${tournament.id.toString()}`), 900);
+    if (!enterReceipt.isSuccess || !enter.data) return;
+    const id = tournament.id.toString();
+    try {
+      sessionStorage.setItem(`snakearena:entryTx:${id}`, enter.data);
+    } catch {
+      // Storage unavailable (private mode) — the query param still carries it.
+    }
+    const timer = setTimeout(() => router.push(`/play/${id}?entryTx=${enter.data}`), 900);
     return () => clearTimeout(timer);
-  }, [enterReceipt.isSuccess, router, tournament.id]);
+  }, [enterReceipt.isSuccess, enter.data, router, tournament.id]);
 
   const approving = approve.isPending || (Boolean(approve.data) && approveReceipt.isLoading);
   const entering = enter.isPending || (Boolean(enter.data) && enterReceipt.isLoading);
@@ -143,9 +172,9 @@ export function EntryFlow({ tierId, tournament, onClose }: EntryFlowProps) {
         <Row label="Current prize pool" value={<span className="text-accent">{formatUsdc(tournament.prizePool)}</span>} />
       </div>
 
-      {failure && step !== 'success' && (
+      {(failure || switchRejected) && step !== 'success' && (
         <p className="mt-4 break-words border border-red-900 bg-red-950/40 px-3 py-2 text-xs text-red-400">
-          {failure}
+          {switchRejected ? `Please switch to ${TARGET_CHAIN_NAME} to play.` : failure}
         </p>
       )}
 
@@ -186,17 +215,23 @@ export function EntryFlow({ tierId, tournament, onClose }: EntryFlowProps) {
             Step 1 of 2 — approve {formatUsdc(fee)} USDC so SnakeArena can collect your entry fee.
           </p>
           <PrimaryButton
-            disabled={approving}
+            disabled={approving || switching}
             onClick={() =>
-              approve.writeContract({
-                address: USDC_ADDRESS,
-                abi: erc20Abi,
-                functionName: 'approve',
-                args: [SNAKE_ARENA_ADDRESS, fee],
-              })
+              withCorrectChain(() =>
+                approve.writeContract({
+                  address: USDC_ADDRESS,
+                  abi: erc20Abi,
+                  functionName: 'approve',
+                  args: [SNAKE_ARENA_ADDRESS, fee],
+                }),
+              )
             }
           >
-            {approving ? (
+            {switching ? (
+              <>
+                <Spinner /> Switching to {TARGET_CHAIN_NAME}…
+              </>
+            ) : approving ? (
               <>
                 <Spinner /> {approve.isPending ? 'Confirm in wallet…' : 'Waiting for confirmation…'}
               </>
@@ -240,17 +275,23 @@ export function EntryFlow({ tierId, tournament, onClose }: EntryFlowProps) {
             Each entry is one game attempt — only your best score counts.
           </p>
           <PrimaryButton
-            disabled={entering}
+            disabled={entering || switching}
             onClick={() =>
-              enter.writeContract({
-                address: SNAKE_ARENA_ADDRESS,
-                abi: snakeArenaAbi,
-                functionName: 'enterTournament',
-                args: [TIER_ENUM_INDEX[tierId], onchainUsername ? '' : usernameInput],
-              })
+              withCorrectChain(() =>
+                enter.writeContract({
+                  address: SNAKE_ARENA_ADDRESS,
+                  abi: snakeArenaAbi,
+                  functionName: 'enterTournament',
+                  args: [TIER_ENUM_INDEX[tierId], onchainUsername ? '' : usernameInput],
+                }),
+              )
             }
           >
-            {entering ? (
+            {switching ? (
+              <>
+                <Spinner /> Switching to {TARGET_CHAIN_NAME}…
+              </>
+            ) : entering ? (
               <>
                 <Spinner /> {enter.isPending ? 'Confirm in wallet…' : 'Entering tournament…'}
               </>
