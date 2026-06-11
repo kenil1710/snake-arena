@@ -1,23 +1,31 @@
-import express from 'express';
-import { TOURNAMENT_TIERS } from '@snake-arena/shared';
+import { loadConfig, loadEnvFiles } from './config.js';
+import { createApp } from './app.js';
+import { createChainClient } from './chain/client.js';
+import { createChainVerifier } from './chain/verify.js';
+import { createScoreSigner } from './signer/sign.js';
+import { SessionManager } from './session/manager.js';
+import { log } from './log.js';
 
-const app = express();
-const port = Number(process.env.PORT ?? 3001);
+loadEnvFiles();
+const config = loadConfig();
 
-app.use(express.json());
+const client = createChainClient(config.rpcUrl);
+const verifier = createChainVerifier({
+  client,
+  snakeArenaAddress: config.snakeArenaAddress,
+  powerUpStoreAddress: config.powerUpStoreAddress,
+});
+const signer = createScoreSigner(config.trustedSignerPrivateKey);
+const sessions = new SessionManager();
+sessions.startCleanup();
 
-app.get('/health', (_req, res) => {
-  res.json({
-    status: 'ok',
-    service: 'snake-arena-backend',
-    timestamp: new Date().toISOString(),
+const app = createApp({ config, sessions, verifier, signer });
+
+app.listen(config.port, () => {
+  log(`SnakeArena backend listening on http://localhost:${config.port}`, {
+    chainId: config.chainId,
+    snakeArena: config.snakeArenaAddress,
+    powerUpStore: config.powerUpStoreAddress,
+    trustedSigner: signer.address,
   });
-});
-
-app.get('/tournaments/tiers', (_req, res) => {
-  res.json(TOURNAMENT_TIERS);
-});
-
-app.listen(port, () => {
-  console.log(`SnakeArena backend listening on http://localhost:${port}`);
 });

@@ -80,7 +80,8 @@ export interface GameState {
   sessionId: string;
   snake: Position[];
   direction: Direction;
-  apple: Position;
+  /** Null only in the (practically unreachable) case that the snake fills the board. */
+  apple: Position | null;
   score: number;
   multiplier: number;
   shield: boolean;
