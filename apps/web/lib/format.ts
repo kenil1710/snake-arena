@@ -26,6 +26,15 @@ export function formatTimeLeft(totalSeconds: number): string {
   return `${minutes}m ${pad(seconds)}s`;
 }
 
+/** "just now" / "4 min ago" / "2 h ago" / "3 d ago" from a unix-seconds time. */
+export function timeAgo(unixSeconds: number): string {
+  const seconds = Math.max(0, Math.floor(Date.now() / 1000) - unixSeconds);
+  if (seconds < 60) return 'just now';
+  if (seconds < 3_600) return `${Math.floor(seconds / 60)} min ago`;
+  if (seconds < 86_400) return `${Math.floor(seconds / 3_600)} h ago`;
+  return `${Math.floor(seconds / 86_400)} d ago`;
+}
+
 /** Human-readable message out of a viem/wagmi error. */
 export function errorMessage(error: unknown): string | null {
   if (!error) return null;

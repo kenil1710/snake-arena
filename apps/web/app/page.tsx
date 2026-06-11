@@ -1,24 +1,29 @@
 'use client';
 
-import { useMemo, useState } from 'react';
-import { useAccount, useReadContracts } from 'wagmi';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useAccount, usePublicClient, useReadContracts } from 'wagmi';
 import { snakeArenaAbi } from '@/lib/abis/snakeArena';
 import {
   SNAKE_ARENA_ADDRESS,
   TIER_ENUM_INDEX,
   TOURNAMENT_TIER_IDS,
   type ActiveTournament,
+  type PlayerEntry,
   type TournamentTierId,
 } from '@/lib/contracts';
+import { truncateAddress } from '@/lib/format';
 import { StatsBanner } from '@/components/StatsBanner';
-import { TournamentCard } from '@/components/TournamentCard';
+import { TournamentCard, type TopPlayerTeaser } from '@/components/TournamentCard';
 import { EntryFlow } from '@/components/EntryFlow';
 import { NetworkGuard } from '@/components/NetworkGuard';
+import { WinnersFeed } from '@/components/WinnersFeed';
 
 const REFETCH_MS = 10_000;
+const EVENT_REFETCH_DEBOUNCE_MS = 500;
 
 export default function LobbyPage() {
   const { address } = useAccount();
+  const publicClient = usePublicClient();
   const [entryTarget, setEntryTarget] = useState<{
     tierId: TournamentTierId;
     tournament: ActiveTournament;
@@ -76,6 +81,89 @@ export default function LobbyPage() {
     return (read.result as readonly [string, bigint, bigint, bigint])[3];
   });
 
+  // Top-3 teaser per card: one getLeaderboard(id, 3) for each populated pool.
+  const populated = tournaments
+    .map((tournament, tierIndex) => ({ tournament, tierIndex }))
+    .filter((item) => (item.tournament?.players.length ?? 0) > 0);
+  const teaserReads = useReadContracts({
+    contracts: populated.map(
+      ({ tournament }) =>
+        ({
+          address: SNAKE_ARENA_ADDRESS,
+          abi: snakeArenaAbi,
+          functionName: 'getLeaderboard',
+          args: [tournament!.id, 3n],
+        }) as const,
+    ),
+    query: { enabled: populated.length > 0, refetchInterval: REFETCH_MS },
+  });
+  const teaserEntries = populated.map((item, index) => ({
+    tierIndex: item.tierIndex,
+    entries:
+      teaserReads.data?.[index]?.status === 'success'
+        ? (teaserReads.data[index].result as readonly PlayerEntry[])
+        : [],
+  }));
+
+  const teaserWallets = teaserEntries.flatMap((t) => t.entries.map((entry) => entry.wallet));
+  const teaserNameReads = useReadContracts({
+    contracts: teaserWallets.map(
+      (wallet) =>
+        ({
+          address: SNAKE_ARENA_ADDRESS,
+          abi: snakeArenaAbi,
+          functionName: 'usernames',
+          args: [wallet],
+        }) as const,
+    ),
+    query: { enabled: teaserWallets.length > 0 },
+  });
+  const nameOf = new Map<string, string>();
+  teaserWallets.forEach((wallet, index) => {
+    const read = teaserNameReads.data?.[index];
+    if (read?.status === 'success' && read.result) nameOf.set(wallet.toLowerCase(), read.result as string);
+  });
+
+  const top3PerTier: TopPlayerTeaser[][] = TOURNAMENT_TIER_IDS.map((_, tierIndex) => {
+    const teaser = teaserEntries.find((t) => t.tierIndex === tierIndex);
+    return (teaser?.entries ?? [])
+      .filter((entry) => entry.bestScore > 0n)
+      .map((entry) => ({
+        name: nameOf.get(entry.wallet.toLowerCase()) ?? truncateAddress(entry.wallet),
+        score: entry.bestScore,
+      }));
+  });
+
+  // Contract events nudge an immediate refetch so counts/pools/leaders move
+  // without waiting out the polling interval.
+  const refetchRef = useRef<() => void>(() => {});
+  refetchRef.current = () => {
+    activeReads.refetch();
+    entryReads.refetch();
+    teaserReads.refetch();
+  };
+  useEffect(() => {
+    if (!publicClient) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const onLogs = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => refetchRef.current(), EVENT_REFETCH_DEBOUNCE_MS);
+    };
+    const unwatchers = (['EnteredTournament', 'ScoreSubmitted', 'TournamentFinalized'] as const).map(
+      (eventName) =>
+        publicClient.watchContractEvent({
+          address: SNAKE_ARENA_ADDRESS,
+          abi: snakeArenaAbi,
+          eventName,
+          onLogs,
+        }),
+    );
+    return () => {
+      clearTimeout(timer);
+      unwatchers.forEach((unwatch) => unwatch());
+    };
+  }, [publicClient]);
+
   const totalPlayers = allLoaded
     ? tournaments.reduce((sum, t) => sum + (t?.players.length ?? 0), 0)
     : undefined;
@@ -110,6 +198,7 @@ export default function LobbyPage() {
               tierId={tierId}
               tournament={tournaments[index]}
               entryCount={entryCounts[index]}
+              top3={top3PerTier[index]}
               onEnter={() => {
                 const tournament = tournaments[index];
                 if (tournament) setEntryTarget({ tierId, tournament });
@@ -118,8 +207,10 @@ export default function LobbyPage() {
           ))}
         </section>
 
+        <WinnersFeed />
+
         <footer className="mt-auto pt-6 text-xs text-muted">
-          Live on Base Sepolia · data refreshes every {REFETCH_MS / 1000}s
+          Live on Base Sepolia · updates in real time
         </footer>
       </div>
 

@@ -9,9 +9,13 @@ import {
   DEPLOY_BLOCK,
   EXPLORER_URL,
   SNAKE_ARENA_ADDRESS,
+  TIER_ENUM_INDEX,
   TOURNAMENT_TIER_IDS,
   TOURNAMENT_TIERS,
+  type ActiveTournament,
+  type PlayerEntry,
 } from '@/lib/contracts';
+import { cachedLogScan, TOURNAMENT_FINALIZED_EVENT, type FinalizedArgs } from '@/lib/events';
 import { formatUsdc, truncateAddress } from '@/lib/format';
 
 const ENTERED_EVENT = parseAbiItem(
@@ -89,6 +93,87 @@ export default function ProfilePage() {
     return tierId ? TOURNAMENT_TIERS[tierId].label : `Tournament #${tournamentId.toString()}`;
   };
 
+  // Winnings: every TournamentFinalized payout addressed to this wallet.
+  const wins = useQuery({
+    queryKey: ['profile-wins', address],
+    enabled: Boolean(address) && Boolean(client),
+    refetchInterval: 30_000,
+    queryFn: async () => {
+      const logs = await cachedLogScan<FinalizedArgs>({
+        client: client!,
+        event: TOURNAMENT_FINALIZED_EVENT,
+        cacheKey: 'tournament-finalized',
+      });
+      return logs
+        .flatMap((log) => {
+          const winnerIndex = log.args.winners.findIndex(
+            (winner) => winner.toLowerCase() === address!.toLowerCase(),
+          );
+          if (winnerIndex === -1) return [];
+          return [
+            {
+              tournamentId: log.args.tournamentId,
+              place: winnerIndex + 1,
+              payout: log.args.payouts[winnerIndex] ?? 0n,
+              txHash: log.transactionHash,
+              blockNumber: log.blockNumber,
+            },
+          ];
+        })
+        .sort((a, b) => Number(b.blockNumber - a.blockNumber));
+    },
+  });
+  const totalWinnings = wins.data?.reduce((sum, win) => sum + win.payout, 0n);
+
+  // Live rank in each active tournament the user has entered.
+  const activeReads = useReadContracts({
+    contracts: TOURNAMENT_TIER_IDS.map(
+      (tierId) =>
+        ({
+          address: SNAKE_ARENA_ADDRESS,
+          abi: snakeArenaAbi,
+          functionName: 'getActiveTournament',
+          args: [TIER_ENUM_INDEX[tierId]],
+        }) as const,
+    ),
+    query: { refetchInterval: 15_000 },
+  });
+  const activeTournaments = TOURNAMENT_TIER_IDS.map((_, index) => {
+    const read = activeReads.data?.[index];
+    return read?.status === 'success' ? (read.result as unknown as ActiveTournament) : undefined;
+  });
+  const enteredActive = activeTournaments.filter(
+    (tournament): tournament is ActiveTournament =>
+      Boolean(address) &&
+      Boolean(tournament) &&
+      tournament!.players.some((player) => player.toLowerCase() === address!.toLowerCase()),
+  );
+  const rankReads = useReadContracts({
+    contracts: enteredActive.map(
+      (tournament) =>
+        ({
+          address: SNAKE_ARENA_ADDRESS,
+          abi: snakeArenaAbi,
+          functionName: 'getLeaderboard',
+          args: [tournament.id, BigInt(Math.min(tournament.players.length, 100))],
+        }) as const,
+    ),
+    query: { enabled: enteredActive.length > 0, refetchInterval: 15_000 },
+  });
+  const activeRanks = enteredActive.map((tournament, index) => {
+    const read = rankReads.data?.[index];
+    const board = read?.status === 'success' ? (read.result as readonly PlayerEntry[]) : undefined;
+    const rank = board?.findIndex(
+      (entry) => entry.wallet.toLowerCase() === address!.toLowerCase(),
+    );
+    return {
+      tournament,
+      tierId: TOURNAMENT_TIER_IDS[tournament.tier],
+      rank: rank !== undefined && rank >= 0 ? rank + 1 : null,
+      playerCount: tournament.players.length,
+    };
+  });
+
   const totalEntries = history.data?.entered.length;
   const totalSpent = history.data?.entered.reduce(
     (sum, log) => sum + (tournamentInfo.get(log.args.tournamentId!)?.entryFee ?? 0n),
@@ -139,13 +224,94 @@ export default function ProfilePage() {
       <h1 className="text-2xl font-semibold tracking-tight">Profile</h1>
       <p className="mt-1 text-sm text-muted">{truncateAddress(address)} on Base Sepolia</p>
 
-      <section className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <section className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <StatBlock
+          label="Total winnings"
+          value={
+            totalWinnings === undefined ? (
+              '—'
+            ) : (
+              <span className="text-accent">{formatUsdc(totalWinnings)}</span>
+            )
+          }
+        />
         <StatBlock label="Total entries" value={totalEntries ?? '—'} />
         <StatBlock
           label="Total entry spend"
           value={totalSpent === undefined ? '—' : formatUsdc(totalSpent)}
         />
         <StatBlock label="Best score" value={bestScore === undefined ? '—' : bestScore.toString()} />
+      </section>
+
+      <section className="mt-8">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
+          Active tournaments
+        </h2>
+        <div className="mt-3 divide-y divide-edge border bg-surface">
+          {activeReads.isLoading && (
+            <p className="px-4 py-5 text-center text-sm text-muted">Loading…</p>
+          )}
+          {!activeReads.isLoading && activeRanks.length === 0 && (
+            <p className="px-4 py-5 text-center text-sm text-muted">
+              Not entered in any active tournament — pick one in the lobby.
+            </p>
+          )}
+          {activeRanks.map(({ tournament, tierId, rank, playerCount }) => (
+            <a
+              key={tournament.id.toString()}
+              href={`/leaderboard/${tournament.id.toString()}`}
+              className="flex items-center justify-between gap-3 px-4 py-3 text-sm transition-colors hover:bg-edge/40"
+            >
+              <span className="font-medium">{TOURNAMENT_TIERS[tierId].label}</span>
+              <span className="tabular-nums text-muted">
+                {rank !== null ? (
+                  <>
+                    <span className={rank <= 3 ? 'font-semibold text-accent' : 'text-white'}>
+                      #{rank}
+                    </span>{' '}
+                    of {playerCount}
+                  </>
+                ) : (
+                  'no score yet'
+                )}
+              </span>
+            </a>
+          ))}
+        </div>
+      </section>
+
+      <section className="mt-8">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Win history</h2>
+        <div className="mt-3 divide-y divide-edge border bg-surface">
+          {wins.isLoading && <p className="px-4 py-5 text-center text-sm text-muted">Scanning…</p>}
+          {wins.isSuccess && wins.data.length === 0 && (
+            <p className="px-4 py-5 text-center text-sm text-muted">
+              No wins yet — top 3 when a tournament closes pays out automatically.
+            </p>
+          )}
+          {(wins.data ?? []).map((win) => (
+            <div
+              key={`${win.txHash}-${win.tournamentId.toString()}`}
+              className="flex items-center justify-between gap-3 px-4 py-3 text-sm"
+            >
+              <span>
+                <span className="font-semibold tabular-nums text-accent">
+                  {formatUsdc(win.payout)}
+                </span>{' '}
+                · {['🥇', '🥈', '🥉'][win.place - 1] ?? `#${win.place}`} in{' '}
+                {tierLabelOf(win.tournamentId)}
+              </span>
+              <a
+                href={`${EXPLORER_URL}/tx/${win.txHash}`}
+                target="_blank"
+                rel="noreferrer"
+                className="shrink-0 text-xs text-muted transition-colors hover:text-accent"
+              >
+                tx ↗
+              </a>
+            </div>
+          ))}
+        </div>
       </section>
 
       <section className="mt-8">

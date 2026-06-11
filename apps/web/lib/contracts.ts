@@ -56,3 +56,26 @@ export interface ActiveTournament {
   finalized: boolean;
   players: readonly Address[];
 }
+
+/** Shape of one SnakeArena.getLeaderboard / entries tuple. */
+export interface PlayerEntry {
+  wallet: Address;
+  bestScore: bigint;
+  lastSubmissionTime: bigint;
+  entryCount: bigint;
+}
+
+/**
+ * Projected payouts per PrizeDistributor rules: 3+ players → 45/25/20 (+10%
+ * treasury, not shown); 1–2 players → winner takes 90%.
+ */
+export function prizeBreakdown(pool: bigint, playerCount: number): { label: string; amount: bigint }[] {
+  if (playerCount >= 3) {
+    return [
+      { label: '1st', amount: (pool * 45n) / 100n },
+      { label: '2nd', amount: (pool * 25n) / 100n },
+      { label: '3rd', amount: (pool * 20n) / 100n },
+    ];
+  }
+  return [{ label: 'Winner', amount: (pool * 90n) / 100n }];
+}
