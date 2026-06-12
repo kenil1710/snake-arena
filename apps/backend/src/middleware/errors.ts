@@ -1,5 +1,7 @@
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
-import { logError } from '../log.js';
+import { createLogger } from '../lib/logger.js';
+
+const logger = createLogger('http');
 
 /** Throwable HTTP error with a machine-readable code. */
 export class ApiError extends Error {
@@ -45,6 +47,6 @@ export function errorHandler(err: unknown, _req: Request, res: Response, next: N
     res.status(400).json({ error: 'INVALID_JSON', message: 'Request body is not valid JSON' });
     return;
   }
-  logError('unhandled error', err);
+  logger.error('unhandled error', err);
   res.status(500).json({ error: 'INTERNAL_ERROR' });
 }

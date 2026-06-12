@@ -2,16 +2,11 @@
 
 import { useEffect, useRef } from 'react';
 import type { Direction } from '@snake-arena/shared';
+import { canvasColors } from '@/lib/design-tokens';
 import type { WireGameState } from '@/lib/gameApi';
 
 const CELL = 20;
-const COLORS = {
-  background: '#0a0a0a',
-  grid: '#1a1a1a',
-  snake: '#14b8a6',
-  snakeHead: '#5eead4',
-  apple: '#ef4444',
-} as const;
+const COLORS = canvasColors;
 const SWIPE_THRESHOLD_PX = 24;
 const PARTICLES_PER_APPLE = 14;
 
@@ -122,7 +117,7 @@ export function SnakeCanvas({ state, onDirection }: SnakeCanvasProps) {
 
       // Death: dim the board under the GameOver overlay.
       if (!current.alive) {
-        context.fillStyle = 'rgba(10, 10, 10, 0.7)';
+        context.fillStyle = 'rgba(7, 9, 13, 0.72)';
         context.fillRect(0, 0, logicalSize, logicalSize);
       }
 
@@ -176,7 +171,7 @@ export function SnakeCanvas({ state, onDirection }: SnakeCanvasProps) {
       ref={canvasRef}
       onTouchStart={onTouchStart}
       onTouchEnd={onTouchEnd}
-      className="aspect-square w-full touch-none border bg-background"
+      className="aspect-square w-full touch-none rounded-card border border-accent/20 bg-background shadow-canvas"
       style={{ imageRendering: 'pixelated' }}
       aria-label="Snake game board"
     />

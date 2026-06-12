@@ -3,31 +3,39 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { parseAbiItem, type Hex } from 'viem';
+import { AnimatePresence, motion } from 'framer-motion';
+import type { Hex } from 'viem';
 import { useAccount, usePublicClient, useReadContract } from 'wagmi';
 import { ConnectWallet } from '@coinbase/onchainkit/wallet';
 import type { Direction } from '@snake-arena/shared';
 import { snakeArenaAbi } from '@/lib/abis/snakeArena';
-import { DEPLOY_BLOCK, SNAKE_ARENA_ADDRESS, type ActiveTournament } from '@/lib/contracts';
+import {
+  SNAKE_ARENA_ADDRESS,
+  TOURNAMENT_TIER_IDS,
+  TOURNAMENT_TIERS,
+  type ActiveTournament,
+} from '@/lib/contracts';
+import { cachedLogScan, ENTERED_TOURNAMENT_EVENT, type EnteredArgs } from '@/lib/events';
 import {
   GameApiError,
   sendMove,
   startSession,
   type WireGameState,
 } from '@/lib/gameApi';
+import { sheetUp } from '@/lib/animations';
+import { formatUsdc } from '@/lib/format';
 import { playAppleSound, playDeathSound } from '@/lib/sounds';
+import { useLeaderboard } from '@/hooks/useLeaderboard';
+import { Countdown } from '@/components/Countdown';
+import { TierIcon } from '@/components/illustrations/TierIcon';
 import { SnakeCanvas } from './SnakeCanvas';
 import { ScoreDisplay } from './ScoreDisplay';
-import { Timer } from './Timer';
 import { PowerUpBar } from './PowerUpBar';
 import { GameOver } from './GameOver';
+import { LiveLeaderboardPanel } from './LiveLeaderboardPanel';
 
 /** Client-driven tick cadence; the server caps accepted moves at 20/sec. */
 const TICK_MS = 150;
-
-const ENTERED_EVENT = parseAbiItem(
-  'event EnteredTournament(uint256 indexed tournamentId, address indexed player, uint256 entryNumber)',
-);
 
 const OPPOSITES: Record<Direction, Direction> = {
   UP: 'DOWN',
@@ -45,9 +53,11 @@ type StartFailure =
 
 function Screen({ children }: { children: React.ReactNode }) {
   return (
-    <main className="mx-auto flex w-full max-w-[600px] flex-col items-center gap-4 px-4 py-24 text-center">
-      {children}
-    </main>
+    <div className="bg-game-glow min-h-[calc(100vh-3.5rem)]">
+      <main className="mx-auto flex w-full max-w-[600px] flex-col items-center gap-4 px-4 py-24 text-center">
+        {children}
+      </main>
+    </div>
   );
 }
 
@@ -61,6 +71,17 @@ export function GameClient({ tournamentId }: { tournamentId: number }) {
   const [gameState, setGameState] = useState<WireGameState | null>(null);
   const [startFailure, setStartFailure] = useState<StartFailure | null>(null);
   const [scoreSubmitted, setScoreSubmitted] = useState(false);
+  const [boardOpen, setBoardOpen] = useState(false);
+
+  // Lock background scroll while the mobile leaderboard sheet is up.
+  useEffect(() => {
+    if (!boardOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [boardOpen]);
 
   // Refs so the tick loop always sees the latest values without re-binding.
   const stateRef = useRef<WireGameState | null>(null);
@@ -85,6 +106,10 @@ export function GameClient({ tournamentId }: { tournamentId: number }) {
   const entryCount = entryRead.data
     ? (entryRead.data as readonly [string, bigint, bigint, bigint])[3]
     : undefined;
+
+  // Live rank for the info bar (shares query keys with the leaderboard panel).
+  const { userRank } = useLeaderboard(BigInt(tournamentId));
+  const tierId = tournament ? TOURNAMENT_TIER_IDS[tournament.tier] : undefined;
 
   /** Single funnel for every server state update: sounds fire on transitions. */
   const applyState = useCallback((next: WireGameState) => {
@@ -124,15 +149,19 @@ export function GameClient({ tournamentId }: { tournamentId: number }) {
       }
 
       // Fallback for direct navigation: find this wallet's entries on-chain.
+      // cachedLogScan chunks the range (public RPCs cap getLogs at 10k blocks)
+      // and shares the profile page's per-address cache.
       try {
-        const logs = await publicClient.getLogs({
-          address: SNAKE_ARENA_ADDRESS,
-          event: ENTERED_EVENT,
-          args: { tournamentId: BigInt(tournamentId), player: address },
-          fromBlock: DEPLOY_BLOCK,
-          toBlock: 'latest',
+        const logs = await cachedLogScan<EnteredArgs>({
+          client: publicClient,
+          event: ENTERED_TOURNAMENT_EVENT,
+          args: { player: address },
+          cacheKey: `entered:${address.toLowerCase()}`,
         });
-        for (const log of logs.reverse()) candidates.push(log.transactionHash);
+        const mine = logs
+          .filter((log) => log.args.tournamentId === BigInt(tournamentId))
+          .sort((a, b) => Number(b.blockNumber - a.blockNumber));
+        for (const log of mine) candidates.push(log.transactionHash);
       } catch {
         // RPC hiccup — explicit candidates may still work.
       }
@@ -227,8 +256,11 @@ export function GameClient({ tournamentId }: { tournamentId: number }) {
   if (!isConnected || !address) {
     return (
       <Screen>
-        <p className="text-sm text-muted">Connect your wallet to play.</p>
-        <ConnectWallet className="!rounded-none !bg-accent hover:!bg-accent-hover" />
+        <span className="text-3xl" aria-hidden>
+          🐍
+        </span>
+        <p className="text-sm text-secondary">Connect your wallet to play.</p>
+        <ConnectWallet className="!rounded-btn !bg-accent hover:!bg-accent-hover" />
       </Screen>
     );
   }
@@ -236,34 +268,36 @@ export function GameClient({ tournamentId }: { tournamentId: number }) {
   if (startFailure) {
     return (
       <Screen>
-        <p className="text-sm font-medium">
-          {startFailure.kind === 'no-fresh-entry'
-            ? 'No unplayed entry found'
-            : 'Could not start the game'}
-        </p>
-        <p className="max-w-sm text-sm text-muted">
-          {startFailure.kind === 'no-fresh-entry'
-            ? 'Each entry is one game attempt and all of yours have been played. Enter again from the lobby for another run.'
-            : startFailure.message}
-        </p>
-        <div className="flex gap-3">
-          <Link
-            href="/"
-            className="bg-accent px-4 py-2 text-sm font-semibold text-background transition-colors hover:bg-accent-hover"
-          >
-            Back to lobby
-          </Link>
-          {startFailure.kind !== 'no-fresh-entry' && (
-            <button
-              onClick={() => {
-                startingRef.current = false;
-                setStartFailure(null);
-              }}
-              className="border px-4 py-2 text-sm text-muted transition-colors hover:text-white"
+        <div className="w-full max-w-sm rounded-card border bg-surface p-6 shadow-card">
+          <p className="text-base font-bold tracking-tight">
+            {startFailure.kind === 'no-fresh-entry'
+              ? 'No unplayed entry found'
+              : 'Could not start the game'}
+          </p>
+          <p className="mt-2 text-sm text-secondary">
+            {startFailure.kind === 'no-fresh-entry'
+              ? 'Each entry is one game attempt and all of yours have been played. Enter again from the lobby for another run.'
+              : startFailure.message}
+          </p>
+          <div className="mt-5 flex gap-2.5">
+            <Link
+              href="/"
+              className="flex min-h-12 flex-1 items-center justify-center rounded-btn bg-accent text-sm font-bold text-background transition-colors hover:bg-accent-hover"
             >
-              Retry
-            </button>
-          )}
+              Back to lobby
+            </Link>
+            {startFailure.kind !== 'no-fresh-entry' && (
+              <button
+                onClick={() => {
+                  startingRef.current = false;
+                  setStartFailure(null);
+                }}
+                className="flex min-h-12 flex-1 items-center justify-center rounded-btn border text-sm font-semibold text-secondary transition-colors hover:border-accent/50 hover:text-white"
+              >
+                Retry
+              </button>
+            )}
+          </div>
         </div>
       </Screen>
     );
@@ -272,7 +306,11 @@ export function GameClient({ tournamentId }: { tournamentId: number }) {
   if (!sessionId || !gameState) {
     return (
       <Screen>
-        <p className="text-sm text-muted">
+        <span
+          aria-hidden
+          className="inline-block h-6 w-6 animate-spin rounded-full border-2 border-accent border-t-transparent"
+        />
+        <p className="text-sm text-secondary">
           {entryCount === undefined ? 'Checking your entry…' : 'Starting your game…'}
         </p>
       </Screen>
@@ -282,37 +320,110 @@ export function GameClient({ tournamentId }: { tournamentId: number }) {
   // --- The game -------------------------------------------------------------
 
   return (
-    <main className="mx-auto w-full max-w-[600px] px-4 py-6">
-      <div className="flex items-center justify-between">
-        <Link href="/" className="text-sm text-muted transition-colors hover:text-white">
-          ← Quit
-        </Link>
-        <Timer endTime={tournament?.endTime} />
-      </div>
+    <div className="bg-game-glow min-h-[calc(100vh-3.5rem)]">
+      <main className="mx-auto w-full max-w-[1024px] px-4 py-6">
+      <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start lg:gap-8">
+        {/* Game column */}
+        <div className="mx-auto w-full max-w-[600px]">
+          {/* Tournament context — quit, tier, pool, clock, rank. Always visible. */}
+          <div className="flex items-center gap-2">
+            <Link
+              href="/"
+              aria-label="Quit to lobby"
+              className="glass flex h-10 w-10 shrink-0 items-center justify-center rounded-btn border border-white/10 text-secondary transition-colors hover:text-white"
+            >
+              ←
+            </Link>
+            <div className="glass flex min-h-10 flex-1 items-center justify-between gap-2 rounded-btn border border-white/10 px-3 py-1.5">
+              <span className="flex min-w-0 items-center gap-1.5">
+                {tierId && <TierIcon tierId={tierId} size={20} className="shrink-0" />}
+                <span className="truncate text-xs font-bold tracking-tight">
+                  {tierId ? TOURNAMENT_TIERS[tierId].label : '…'}
+                </span>
+              </span>
+              <span className="flex shrink-0 items-center gap-2.5 text-xs">
+                <span className="font-mono font-semibold tabular-nums text-accent">
+                  {tournament ? formatUsdc(tournament.prizePool) : '—'}
+                </span>
+                {tournament && <Countdown endTime={tournament.endTime} className="text-xs" />}
+                {userRank !== null && (
+                  <span className="rounded-full border border-gold/40 bg-gold/10 px-1.5 py-0.5 font-mono text-[10px] font-bold tabular-nums text-gold">
+                    #{userRank}
+                  </span>
+                )}
+              </span>
+            </div>
+          </div>
 
-      <ScoreDisplay state={gameState} />
+          <ScoreDisplay state={gameState} />
 
-      <div className="relative mt-3">
-        <SnakeCanvas state={gameState} onDirection={handleDirection} />
-        {!gameState.alive && (
-          <GameOver
-            state={gameState}
+          <div className="relative mt-3">
+            <SnakeCanvas state={gameState} onDirection={handleDirection} />
+            {!gameState.alive && (
+              <GameOver
+                state={gameState}
+                sessionId={sessionId}
+                tournamentId={tournamentId}
+                onSubmitted={() => setScoreSubmitted(true)}
+                onState={applyState}
+              />
+            )}
+          </div>
+
+          <PowerUpBar
             sessionId={sessionId}
-            onSubmitted={() => setScoreSubmitted(true)}
+            state={gameState}
+            scoreSubmitted={scoreSubmitted}
+            onState={applyState}
           />
-        )}
+
+          <button
+            onClick={() => setBoardOpen(true)}
+            className="mt-4 flex min-h-12 w-full items-center justify-center gap-2 rounded-btn border bg-surface text-sm font-semibold text-secondary transition-colors hover:border-accent/50 hover:text-white lg:hidden"
+          >
+            <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-live" aria-hidden />
+            Live leaderboard
+          </button>
+
+          <p className="mt-3 text-center text-xs text-muted">
+            Arrow keys / WASD to steer · swipe on mobile
+          </p>
+        </div>
+
+        {/* Desktop: ranking lives beside the board */}
+        <aside className="hidden lg:sticky lg:top-[4.5rem] lg:block">
+          <LiveLeaderboardPanel tournamentId={tournamentId} withInfo />
+        </aside>
       </div>
 
-      <PowerUpBar
-        sessionId={sessionId}
-        state={gameState}
-        scoreSubmitted={scoreSubmitted}
-        onState={applyState}
-      />
-
-      <p className="mt-3 text-center text-xs text-muted">
-        Arrow keys / WASD to steer · swipe on mobile
-      </p>
-    </main>
+      {/* Mobile: ranking slides up as a sheet */}
+      <AnimatePresence>
+        {boardOpen && (
+          <div className="fixed inset-0 z-50 flex items-end justify-center lg:hidden">
+            <motion.button
+              aria-label="Close leaderboard"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setBoardOpen(false)}
+              className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+            />
+            <motion.div
+              variants={sheetUp}
+              initial="hidden"
+              animate="show"
+              exit="exit"
+              className="relative max-h-[78vh] w-full overflow-y-auto rounded-t-card bg-background p-3 pb-[max(env(safe-area-inset-bottom),0.75rem)]"
+            >
+              <div className="flex justify-center pb-2.5" aria-hidden>
+                <span className="h-1 w-9 rounded-full bg-edge" />
+              </div>
+              <LiveLeaderboardPanel tournamentId={tournamentId} withInfo />
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+      </main>
+    </div>
   );
 }

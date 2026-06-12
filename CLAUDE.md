@@ -127,6 +127,10 @@ snake-arena/
 │       │   │   └── validator.ts # Move validation, anti-cheat
 │       │   ├── signer/
 │       │   │   └── ecdsa.ts     # Score signing
+│       │   ├── cron/
+│       │   │   ├── tournamentFinalizer.ts  # Auto finalizeTournament keeper
+│       │   │   ├── healthMonitor.ts        # Gas/stuck-tournament checks
+│       │   │   └── cronScheduler.ts        # node-cron wiring
 │       │   └── server.ts
 └── packages/
     └── shared/                  # Shared types between web + backend + contracts
@@ -371,13 +375,13 @@ Reference: https://docs.base.org/identity/smart-wallet/concepts/features/optiona
 
 ## Cron / automation
 
-Use **Vercel Cron** (or backend cron) to:
+**Implemented in the backend** (`apps/backend/src/cron/`), not Vercel cron — the keeper runs inside the Express server via node-cron:
 
-- Every minute: check for tournaments past `endTime` → call `finalizeTournament`
-- Every hour: ensure new `1usd_hourly` tournament exists
-- Daily at 00:00 UTC: ensure new daily tournaments of each tier exist
+- `tournamentFinalizer.ts` — every 60s, checks all 4 tiers; once `endTime + 30s` grace has passed (late `/api/session/end` scores still land), calls `finalizeTournament`. The contract pays winners **and starts the tier's next tournament in the same tx**, so no separate "ensure tournament exists" job is needed.
+- `healthMonitor.ts` — every 5 min: finalizer gas balance (WARN < 0.001 ETH), stuck (expired > 5 min) tournaments, active session count. Console-only; `DISCORD_WEBHOOK_URL` reserved for alerting.
+- `cronScheduler.ts` — schedules both, runs them once at startup (backlog catch-up), stopped on SIGTERM.
 
-`apps/web/app/api/cron/rollover/route.ts` handles this. Protect with `CRON_SECRET` env var.
+Env: `CRON_ENABLED` (default true), `FINALIZER_PRIVATE_KEY` (gas wallet; falls back to `DEPLOYER_PRIVATE_KEY` in dev), `ADMIN_SECRET` enables `POST /api/admin/finalize-now` (`x-admin-secret` header) to force a sweep immediately. Exactly **one** keeper instance must run per contract — two would race the wallet nonce.
 
 ---
 
@@ -471,8 +475,8 @@ export const metadata = {
 - [ ] Winner notifications
 
 ### Phase 8 — Cron + automation
-- [ ] Vercel cron route for tournament rollover
-- [ ] Finalization logic
+- [x] Backend cron service (node-cron) for tournament finalization + rollover
+- [x] Health monitor (gas balance, stuck tournaments) + `POST /api/admin/finalize-now`
 
 ### Phase 9 — Deploy + ship
 - [ ] Deploy contracts to Base mainnet
@@ -496,6 +500,10 @@ BASESCAN_API_KEY=
 TRUSTED_SIGNER_PRIVATE_KEY=     # NEVER commit
 SUPABASE_URL=
 SUPABASE_SERVICE_KEY=
+FINALIZER_PRIVATE_KEY=          # gas wallet for finalizeTournament (dev fallback: DEPLOYER_PRIVATE_KEY)
+CRON_ENABLED=true               # set false to run the API without the tournament keeper
+ADMIN_SECRET=                   # enables POST /api/admin/finalize-now
+DISCORD_WEBHOOK_URL=            # optional, reserved for health alerts
 
 # Frontend
 NEXT_PUBLIC_BASE_RPC=
@@ -505,9 +513,6 @@ NEXT_PUBLIC_PAYMASTER_URL=
 NEXT_PUBLIC_CDP_PROJECT_ID=
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
-
-# Cron
-CRON_SECRET=
 ```
 
 ---

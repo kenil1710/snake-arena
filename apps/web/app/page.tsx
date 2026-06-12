@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { motion, useScroll, useTransform } from 'framer-motion';
 import { useAccount, usePublicClient, useReadContracts } from 'wagmi';
 import { snakeArenaAbi } from '@/lib/abis/snakeArena';
 import {
@@ -12,22 +13,41 @@ import {
   type TournamentTierId,
 } from '@/lib/contracts';
 import { truncateAddress } from '@/lib/format';
+import { staggerContainer } from '@/lib/animations';
 import { StatsBanner } from '@/components/StatsBanner';
 import { TournamentCard, type TopPlayerTeaser } from '@/components/TournamentCard';
 import { EntryFlow } from '@/components/EntryFlow';
 import { NetworkGuard } from '@/components/NetworkGuard';
 import { WinnersFeed } from '@/components/WinnersFeed';
+import { HeroBackdrop } from '@/components/illustrations/HeroBackdrop';
 
 const REFETCH_MS = 10_000;
 const EVENT_REFETCH_DEBOUNCE_MS = 500;
 
+type TierFilter = 'all' | TournamentTierId;
+
+const FILTERS: { key: TierFilter; label: string }[] = [
+  { key: 'all', label: 'All' },
+  { key: '1usd_daily', label: '$1' },
+  { key: '5usd_daily', label: '$5' },
+  { key: '25usd_daily', label: '$25' },
+  { key: '1usd_hourly', label: 'Hourly' },
+];
+
 export default function LobbyPage() {
   const { address } = useAccount();
   const publicClient = usePublicClient();
+  const [filter, setFilter] = useState<TierFilter>('all');
   const [entryTarget, setEntryTarget] = useState<{
     tierId: TournamentTierId;
     tournament: ActiveTournament;
   } | null>(null);
+  const tournamentsRef = useRef<HTMLElement>(null);
+
+  // Hero softly collapses as the list scrolls.
+  const { scrollY } = useScroll();
+  const heroOpacity = useTransform(scrollY, [0, 320], [1, 0]);
+  const heroY = useTransform(scrollY, [0, 320], [0, -32]);
 
   // One getActiveTournament call per tier, batched into a single multicall.
   const activeReads = useReadContracts({
@@ -171,56 +191,136 @@ export default function LobbyPage() {
     ? tournaments.reduce((sum, t) => sum + (t?.prizePool ?? 0n), 0n)
     : undefined;
 
+  const visibleTiers = TOURNAMENT_TIER_IDS.map((tierId, index) => ({ tierId, index })).filter(
+    ({ tierId }) => filter === 'all' || tierId === filter,
+  );
+
   return (
     <main className="bg-grid">
       <NetworkGuard>
-      <div className="mx-auto flex min-h-[calc(100vh-3.5rem)] w-full max-w-5xl flex-col gap-6 px-4 py-8">
-        <section>
-          <h1 className="text-2xl font-semibold tracking-tight">Tournaments</h1>
-          <p className="mt-1.5 max-w-xl text-sm text-muted">
-            Pay USDC to enter, play as many times as you like — only your best score counts. Top
-            three split the pool when the clock hits zero.
-          </p>
+        {/* Hero — the game's title screen */}
+        <section className="relative overflow-hidden">
+          <HeroBackdrop />
+          <motion.div
+            style={{ opacity: heroOpacity, y: heroY }}
+            className="relative mx-auto flex min-h-[40vh] w-full max-w-[840px] flex-col items-center justify-center gap-5 px-4 py-14 text-center sm:min-h-[50vh] sm:gap-7 sm:py-20"
+          >
+            <div>
+              <h1 className="text-glow-hero max-w-full text-[40px] font-extrabold leading-[1.05] tracking-tight sm:text-[64px]">
+                Play Snake.
+                <br className="sm:hidden" /> Win USDC.
+              </h1>
+              <p className="mt-3 text-sm text-secondary sm:mt-4 sm:text-base">
+                Pay to enter. Top 3 split the pot.{' '}
+                <span className="font-medium text-white">Live on Base.</span>
+              </p>
+            </div>
+
+            <StatsBanner totalPlayers={totalPlayers} totalPool={totalPool} />
+
+            <button
+              onClick={() =>
+                tournamentsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+              }
+              className="group flex min-h-10 items-center gap-2 rounded-full px-4 text-[13px] font-semibold text-secondary transition-colors hover:text-accent"
+            >
+              <motion.span
+                aria-hidden
+                animate={{ y: [0, 4, 0] }}
+                transition={{ repeat: Infinity, duration: 1.8, ease: 'easeInOut' }}
+              >
+                ↓
+              </motion.span>
+              View Tournaments
+            </button>
+          </motion.div>
         </section>
 
-        <StatsBanner totalPlayers={totalPlayers} totalPool={totalPool} />
+        <div className="mx-auto flex w-full max-w-[1200px] flex-col gap-6 px-4 pb-[max(env(safe-area-inset-bottom),6rem)] sm:gap-8 md:pb-8">
+          {!address && (
+            <p className="rounded-btn border border-accent/25 bg-accent/[0.06] px-4 py-3 text-center text-[13px] text-secondary">
+              👋 Connect your wallet to enter tournaments — browsing is free.
+            </p>
+          )}
 
-        {activeReads.isError && (
-          <p className="border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-400">
-            Could not load tournaments from Base Sepolia. Check your RPC and refresh.
-          </p>
+          {activeReads.isError && (
+            <p className="rounded-btn border border-danger/40 bg-danger/10 px-4 py-3 text-sm text-danger">
+              Could not load tournaments from Base Sepolia. Check your RPC and refresh.
+            </p>
+          )}
+
+          {/* Tournaments */}
+          <section ref={tournamentsRef} className="scroll-mt-20">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 className="text-xl font-bold tracking-tight sm:text-2xl">Tournaments</h2>
+              <div
+                role="tablist"
+                aria-label="Filter tournaments"
+                className="scrollbar-none flex max-w-full gap-1.5 overflow-x-auto rounded-full border bg-surface/80 p-1 backdrop-blur"
+              >
+                {FILTERS.map((item) => (
+                  <button
+                    key={item.key}
+                    role="tab"
+                    aria-selected={filter === item.key}
+                    onClick={() => setFilter(item.key)}
+                    className={`relative min-h-8 rounded-full border px-2.5 text-xs font-semibold transition-colors sm:px-3.5 ${
+                      filter === item.key
+                        ? 'border-transparent text-background'
+                        : 'border-accent/20 bg-surface-elevated/60 text-accent/80 hover:border-accent/45 hover:text-accent'
+                    }`}
+                  >
+                    {filter === item.key && (
+                      <motion.span
+                        layoutId="tier-filter-pill"
+                        transition={{ type: 'spring', stiffness: 420, damping: 34 }}
+                        className="absolute -inset-px rounded-full bg-accent shadow-[inset_0_1px_0_rgba(255,255,255,0.3),0_0_14px_rgba(45,212,191,0.4)]"
+                      />
+                    )}
+                    <span className="relative">{item.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <motion.div
+              key={filter}
+              variants={staggerContainer}
+              initial="hidden"
+              animate="show"
+              className="mt-4 grid gap-4 sm:grid-cols-2"
+            >
+              {visibleTiers.map(({ tierId, index }) => (
+                <TournamentCard
+                  key={tierId}
+                  tierId={tierId}
+                  tournament={tournaments[index]}
+                  entryCount={entryCounts[index]}
+                  top3={top3PerTier[index]}
+                  connected={Boolean(address)}
+                  onEnter={() => {
+                    const tournament = tournaments[index];
+                    if (tournament) setEntryTarget({ tierId, tournament });
+                  }}
+                />
+              ))}
+            </motion.div>
+          </section>
+
+          <WinnersFeed />
+
+          <footer className="mt-auto pt-4 text-center text-xs text-muted sm:text-left">
+            Live on Base Sepolia · updates in real time
+          </footer>
+        </div>
+
+        {entryTarget && (
+          <EntryFlow
+            tierId={entryTarget.tierId}
+            tournament={entryTarget.tournament}
+            onClose={() => setEntryTarget(null)}
+          />
         )}
-
-        <section className="grid gap-4 md:grid-cols-2">
-          {TOURNAMENT_TIER_IDS.map((tierId, index) => (
-            <TournamentCard
-              key={tierId}
-              tierId={tierId}
-              tournament={tournaments[index]}
-              entryCount={entryCounts[index]}
-              top3={top3PerTier[index]}
-              onEnter={() => {
-                const tournament = tournaments[index];
-                if (tournament) setEntryTarget({ tierId, tournament });
-              }}
-            />
-          ))}
-        </section>
-
-        <WinnersFeed />
-
-        <footer className="mt-auto pt-6 text-xs text-muted">
-          Live on Base Sepolia · updates in real time
-        </footer>
-      </div>
-
-      {entryTarget && (
-        <EntryFlow
-          tierId={entryTarget.tierId}
-          tournament={entryTarget.tournament}
-          onClose={() => setEntryTarget(null)}
-        />
-      )}
       </NetworkGuard>
     </main>
   );

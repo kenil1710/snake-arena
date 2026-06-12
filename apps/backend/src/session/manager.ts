@@ -2,7 +2,9 @@ import { randomBytes } from 'node:crypto';
 import type { Address, Hex } from 'viem';
 import { SnakeGame } from '../game-engine/snake.js';
 import { randomSeed } from '../game-engine/rng.js';
-import { log } from '../log.js';
+import { createLogger } from '../lib/logger.js';
+
+const logger = createLogger('session');
 
 /** Hard cap per game: a session older than this is dead regardless of activity. */
 export const SESSION_TTL_MS = 10 * 60 * 1000;
@@ -136,7 +138,7 @@ export class SessionManager {
     if (this.cleanupTimer) return;
     this.cleanupTimer = setInterval(() => {
       const removed = this.cleanupExpiredSessions();
-      if (removed > 0) log('session cleanup', { removed, active: this.sessions.size });
+      if (removed > 0) logger.info('session cleanup', { removed, active: this.sessions.size });
     }, intervalMs);
     // Don't keep the process alive just for cleanup.
     this.cleanupTimer.unref?.();

@@ -10,7 +10,9 @@ import { generateNonce } from '../signer/sign.js';
 import { EntryAlreadyUsedError, type GameSession, type SessionManager } from '../session/manager.js';
 import { ApiError, asyncHandler } from '../middleware/errors.js';
 import { validateBody } from '../middleware/validate.js';
-import { log } from '../log.js';
+import { createLogger } from '../lib/logger.js';
+
+const logger = createLogger('routes/session');
 
 /** Sessions with more rate violations than this don't get their score signed. */
 export const CHEAT_FLAG_LIMIT = 100;
@@ -114,7 +116,7 @@ export function createSessionRouter(deps: SessionRouterDeps): Router {
         throw error;
       }
 
-      log('session started', {
+      logger.info('session started', {
         sessionId: session.id,
         wallet: session.walletAddress,
         tournamentId: session.tournamentId,
@@ -200,7 +202,7 @@ export function createSessionRouter(deps: SessionRouterDeps): Router {
         return;
       }
 
-      log('power-up activated', { sessionId: session.id, type: body.powerUpType, tx: body.txHash });
+      logger.info('power-up activated', { sessionId: session.id, type: body.powerUpType, tx: body.txHash });
       res.json({ state: toWireState(session, session.game.serialize(timestamp)) });
     }),
   );
@@ -227,7 +229,7 @@ export function createSessionRouter(deps: SessionRouterDeps): Router {
       }
 
       if (session.game.cheatFlagCount > CHEAT_FLAG_LIMIT) {
-        log('refusing to sign score for flagged session', {
+        logger.warn('refusing to sign score for flagged session', {
           sessionId: session.id,
           flags: session.game.cheatFlagCount,
         });
@@ -259,7 +261,7 @@ export function createSessionRouter(deps: SessionRouterDeps): Router {
         chainId: config.chainId,
       };
 
-      log('score signed', {
+      logger.info('score signed', {
         sessionId: session.id,
         wallet: session.walletAddress,
         tournamentId: session.tournamentId,

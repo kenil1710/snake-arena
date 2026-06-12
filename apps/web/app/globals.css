@@ -3,19 +3,189 @@
 @tailwind utilities;
 
 body {
-  background-color: #0a0a0a;
+  background-color: #07090d;
+}
+
+/* Mobile chrome: no grey flash on tap, UI text isn't selectable like prose. */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+button,
+a {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Focus: kill default browser rings; keyboard users get a teal ring instead. */
+* {
+  outline: none;
+}
+*:focus-visible {
+  outline: 2px solid #2dd4bf;
+  outline-offset: 2px;
+}
+
+::selection {
+  background-color: #2dd4bf;
+  color: #07090d;
+}
+
+/* Custom scrollbar: thin, dark, teal on hover. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  border-radius: 8px;
+  border: 3px solid #07090d;
+  background-color: #1f2933;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(45, 212, 191, 0.55);
+}
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #1f2933 transparent;
+  }
 }
 
 /* Subtle Linear-style grid for the lobby backdrop. */
 .bg-grid {
   background-image:
-    linear-gradient(to right, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+    linear-gradient(to right, rgba(255, 255, 255, 0.022) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.022) 1px, transparent 1px);
   background-size: 32px 32px;
-  mask-image: linear-gradient(to bottom, black 0%, black 60%, transparent 100%);
+  mask-image: linear-gradient(to bottom, black 0%, black 55%, transparent 100%);
 }
 
-::selection {
-  background-color: #14b8a6;
-  color: #0a0a0a;
+/* Teal gradient applied to text (prize pools, hero numbers). */
+.text-gradient-teal {
+  background-image: linear-gradient(180deg, #2dd4bf 0%, #14b8a6 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Crypto-terminal glow under prize amounts. */
+.text-glow-prize {
+  text-shadow: 0 0 24px rgba(45, 212, 191, 0.4);
+}
+
+/* Title-screen glow for the hero headline. */
+.text-glow-hero {
+  text-shadow:
+    0 0 28px rgba(45, 212, 191, 0.35),
+    0 0 90px rgba(45, 212, 191, 0.14);
+}
+
+/* Hero gradient for filled elements (primary CTAs). */
+.bg-gradient-hero {
+  background-image: linear-gradient(135deg, #2dd4bf 0%, #06b6d4 100%);
+}
+
+/* Primary CTA: hero gradient with a lighter top edge, like a lit key cap. */
+.btn-sheen {
+  background-image:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.22) 0%, rgba(255, 255, 255, 0) 38%),
+    linear-gradient(135deg, #2dd4bf 0%, #06b6d4 100%);
+}
+
+/* Soft gold wash for leader chips and win rows. */
+.bg-gradient-gold {
+  background-image: linear-gradient(135deg, rgba(251, 191, 36, 0.14) 0%, rgba(217, 119, 6, 0.04) 100%);
+}
+
+/* Glassmorphism surface for hero tiles and the wallet pill. */
+.glass {
+  background-color: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+/* Radial teal wash that fades in on card hover (paired with group-hover). */
+.card-hover-glow {
+  background-image: radial-gradient(circle at top right, rgba(45, 212, 191, 0.08) 0%, transparent 50%);
+}
+
+/* Game page: dark radial pool of light behind the board. */
+.bg-game-glow {
+  background-image: radial-gradient(ellipse 80% 60% at 50% 28%, #1a1f2e 0%, #07090d 100%);
+}
+
+/* Live dots that actually breathe (scale, not just opacity). */
+@keyframes live-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.4);
+    opacity: 0.7;
+  }
+}
+.animate-live-dot {
+  animation: live-pulse 1.7s ease-in-out infinite;
+}
+
+/* Hero backdrop orbs drift slowly — barely perceptible, never distracting. */
+@keyframes orb-drift {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  33% {
+    transform: translate(4%, -6%) scale(1.07);
+  }
+  66% {
+    transform: translate(-5%, 4%) scale(0.95);
+  }
+}
+.animate-orb {
+  animation: orb-drift 13s ease-in-out infinite;
+}
+.animate-orb-slow {
+  animation: orb-drift 19s ease-in-out infinite reverse;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-orb,
+  .animate-orb-slow,
+  .animate-live-dot {
+    animation: none;
+  }
+}
+
+/* Shimmer skeletons for loading states. */
+.skeleton {
+  border-radius: 8px;
+  background-color: #161c24;
+  background-image: linear-gradient(
+    100deg,
+    transparent 30%,
+    rgba(255, 255, 255, 0.05) 50%,
+    transparent 70%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.6s linear infinite;
+}
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+/* Horizontal chip strips scroll without a visible scrollbar. */
+.scrollbar-none {
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
 }

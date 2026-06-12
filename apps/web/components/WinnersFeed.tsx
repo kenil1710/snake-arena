@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
+import { Trophy } from 'lucide-react';
 import type { Address } from 'viem';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { usePublicClient } from 'wagmi';
@@ -13,6 +14,7 @@ import {
 } from '@/lib/contracts';
 import { cachedLogScan, TOURNAMENT_FINALIZED_EVENT, type FinalizedArgs } from '@/lib/events';
 import { formatUsdc, timeAgo, truncateAddress } from '@/lib/format';
+import { IdentityAvatar } from '@/components/ui/IdentityAvatar';
 
 const FEED_SIZE = 10;
 const QUERY_KEY = ['winners-feed'];
@@ -26,24 +28,12 @@ interface FeedItem {
   timestamp: number;
 }
 
-/** Deterministic stand-in avatar: the address bytes pick the gradient hues. */
-function Avatar({ address }: { address: Address }) {
-  const hue = parseInt(address.slice(2, 8), 16) % 360;
-  const hue2 = (hue + 80) % 360;
-  return (
-    <span
-      aria-hidden
-      className="inline-block h-6 w-6 shrink-0"
-      style={{
-        background: `linear-gradient(135deg, hsl(${hue} 70% 55%), hsl(${hue2} 70% 40%))`,
-      }}
-    />
-  );
-}
-
 export function WinnersFeed() {
   const publicClient = usePublicClient();
   const queryClient = useQueryClient();
+  // Items present when data first lands render in place; only wins that arrive
+  // later get the slide-in + gold flash.
+  const seededRef = useRef(false);
 
   const feed = useQuery({
     queryKey: QUERY_KEY,
@@ -106,6 +96,10 @@ export function WinnersFeed() {
     },
   });
 
+  useEffect(() => {
+    if (feed.isSuccess && !seededRef.current) seededRef.current = true;
+  }, [feed.isSuccess]);
+
   // New finalizations land in the feed without a refresh.
   useEffect(() => {
     if (!publicClient) return;
@@ -121,37 +115,58 @@ export function WinnersFeed() {
   const items = feed.data ?? [];
 
   return (
-    <section>
-      <h2 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-muted">
-        <span className="inline-block h-1.5 w-1.5 animate-pulse bg-accent" aria-hidden />
-        Live winners
+    <section className="fixed inset-x-0 bottom-0 z-30 border-t border-edge bg-background/85 px-4 pb-[max(env(safe-area-inset-bottom),0.625rem)] pt-2.5 backdrop-blur-xl md:static md:z-auto md:border-0 md:bg-transparent md:p-0 md:backdrop-blur-none">
+      <h2 className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted">
+        <span className="animate-live-dot inline-flex h-1.5 w-1.5 rounded-full bg-live" aria-hidden />
+        <span className="text-live">Live</span> winners
       </h2>
-      <div className="mt-3 divide-y divide-edge border bg-surface">
-        {feed.isLoading && (
-          <p className="px-4 py-5 text-center text-sm text-muted">Scanning finalizations…</p>
-        )}
-        {feed.isSuccess && items.length === 0 && (
-          <p className="px-4 py-5 text-center text-sm text-muted">
-            No tournaments finalized yet — pools pay out when the clock hits zero.
-          </p>
-        )}
+
+      {feed.isLoading && (
+        <div className="mt-2.5 flex gap-2 overflow-hidden md:flex-col">
+          {[0, 1, 2].map((index) => (
+            <div key={index} className="skeleton h-10 w-56 shrink-0 rounded-full md:w-full md:rounded-card" />
+          ))}
+        </div>
+      )}
+      {feed.isSuccess && items.length === 0 && (
+        <p className="mt-2.5 text-center text-[13px] text-muted md:rounded-card md:border md:bg-surface md:px-4 md:py-5 md:text-sm">
+          No payouts yet — pools pay out when the clock hits zero. 🐍
+        </p>
+      )}
+
+      {/* Horizontal chip strip on mobile, vertical list on md+ */}
+      <div className="scrollbar-none -mx-4 mt-2.5 flex gap-2 overflow-x-auto px-4 md:mx-0 md:flex-col md:overflow-visible md:px-0">
         <AnimatePresence initial={false}>
           {items.map((item) => (
             <motion.div
               key={item.key}
               layout
-              initial={{ opacity: 0, x: -16, backgroundColor: 'rgba(20, 184, 166, 0.12)' }}
-              animate={{ opacity: 1, x: 0, backgroundColor: 'rgba(20, 184, 166, 0)' }}
-              transition={{ duration: 0.5 }}
-              className="flex items-center gap-3 px-4 py-3 text-sm"
+              initial={
+                seededRef.current
+                  ? { opacity: 0, x: 28, boxShadow: '0 0 22px rgba(251,191,36,0.45)' }
+                  : false
+              }
+              animate={{ opacity: 1, x: 0, boxShadow: '0 0 0px rgba(251,191,36,0)' }}
+              transition={{
+                opacity: { duration: 0.35, ease: 'easeOut' },
+                x: { duration: 0.35, ease: 'easeOut' },
+                boxShadow: { duration: 1.4, ease: 'easeOut' },
+                layout: { type: 'spring', stiffness: 420, damping: 36 },
+              }}
+              className="flex shrink-0 items-center gap-2 rounded-full border bg-surface py-2 pl-2.5 pr-3.5 text-[13px] shadow-card md:w-full md:rounded-card md:px-4 md:py-3 md:text-sm"
             >
-              <Avatar address={item.winner} />
-              <span className="min-w-0 flex-1 truncate">
-                <span className="font-medium">{item.username ?? truncateAddress(item.winner)}</span>{' '}
-                won <span className="tabular-nums text-accent">{formatUsdc(item.payout)}</span> in{' '}
+              <Trophy size={13} className="shrink-0 text-gold" aria-hidden />
+              <IdentityAvatar seed={item.winner} size={20} />
+              <span className="max-w-32 truncate font-medium md:max-w-none">
+                {item.username ?? truncateAddress(item.winner)}
+              </span>
+              <span className="font-mono font-semibold tabular-nums text-accent">
+                {formatUsdc(item.payout)}
+              </span>
+              <span className="rounded-full border border-edge px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-secondary">
                 {item.tierLabel}
               </span>
-              <span className="shrink-0 text-xs text-muted">
+              <span className="shrink-0 text-xs text-muted md:ml-auto">
                 {item.timestamp > 0 ? timeAgo(item.timestamp) : ''}
               </span>
             </motion.div>

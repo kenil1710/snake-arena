@@ -12,6 +12,14 @@ export interface BackendConfig {
   usdcAddress: Address | null;
   trustedSignerPrivateKey: Hex;
   corsOrigins: string[];
+  /** Master switch for the keeper cron jobs (finalizer + health monitor). */
+  cronEnabled: boolean;
+  /** Pays gas for finalizeTournament; falls back to the deployer key in dev. */
+  finalizerPrivateKey: Hex | null;
+  /** Unlocks POST /api/admin/* endpoints; unset disables them. */
+  adminSecret: string | null;
+  /** Reserved for health-monitor alerting (not wired yet). */
+  discordWebhookUrl: string | null;
 }
 
 const backendRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url))); // apps/backend
@@ -38,11 +46,24 @@ function requireAddress(env: NodeJS.ProcessEnv, name: string): Address {
   return getAddress(value);
 }
 
+const PRIVATE_KEY_RE = /^0x[0-9a-fA-F]{64}$/;
+
 /** Builds the runtime config from the environment. Throws on missing/invalid values. */
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): BackendConfig {
   const privateKey = requireVar(env, 'TRUSTED_SIGNER_PRIVATE_KEY');
-  if (!/^0x[0-9a-fA-F]{64}$/.test(privateKey)) {
+  if (!PRIVATE_KEY_RE.test(privateKey)) {
     throw new Error('TRUSTED_SIGNER_PRIVATE_KEY must be a 0x-prefixed 32-byte hex string');
+  }
+
+  const cronEnabled = !['false', '0'].includes((env.CRON_ENABLED ?? 'true').toLowerCase());
+  const finalizerKey = env.FINALIZER_PRIVATE_KEY || env.DEPLOYER_PRIVATE_KEY || null;
+  if (finalizerKey && !PRIVATE_KEY_RE.test(finalizerKey)) {
+    throw new Error('FINALIZER_PRIVATE_KEY must be a 0x-prefixed 32-byte hex string');
+  }
+  if (cronEnabled && !finalizerKey) {
+    throw new Error(
+      'CRON_ENABLED=true requires FINALIZER_PRIVATE_KEY (DEPLOYER_PRIVATE_KEY works as a dev fallback); set CRON_ENABLED=false to run without the tournament keeper',
+    );
   }
 
   const usdc = env.USDC_BASE_SEPOLIA;
@@ -55,5 +76,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BackendConfig 
     usdcAddress: usdc && isAddress(usdc) ? getAddress(usdc) : null,
     trustedSignerPrivateKey: privateKey as Hex,
     corsOrigins: (env.CORS_ORIGINS ?? 'http://localhost:3000').split(',').map((o) => o.trim()),
+    cronEnabled,
+    finalizerPrivateKey: finalizerKey as Hex | null,
+    adminSecret: env.ADMIN_SECRET || null,
+    discordWebhookUrl: env.DISCORD_WEBHOOK_URL || null,
   };
 }

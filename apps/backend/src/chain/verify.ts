@@ -1,7 +1,9 @@
 import { parseEventLogs, type Address, type Hex, type Log } from 'viem';
 import { POWER_UP_ENUM_INDEX, type PowerUpType } from '@snake-arena/shared';
 import { POWER_UP_STORE_EVENTS, SNAKE_ARENA_EVENTS } from './abi.js';
-import { logError } from '../log.js';
+import { createLogger } from '../lib/logger.js';
+
+const logger = createLogger('chain/verify');
 
 export type VerificationResult = { ok: true } | { ok: false; reason: string };
 
@@ -51,7 +53,7 @@ export function createChainVerifier(options: ChainVerifierOptions): ChainVerifie
       return await client.getTransactionReceipt({ hash: txHash });
     } catch (error) {
       // Covers "not found / not yet mined" as well as transient RPC errors.
-      logError(`failed to fetch receipt ${txHash}`, error);
+      logger.error(`failed to fetch receipt ${txHash}`, error);
       return null;
     }
   }

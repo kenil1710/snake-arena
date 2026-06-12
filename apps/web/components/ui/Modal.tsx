@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect } from 'react';
+import { motion } from 'framer-motion';
+import { sheetUp } from '@/lib/animations';
 
 interface ModalProps {
   title: string;
@@ -8,14 +10,20 @@ interface ModalProps {
   children: React.ReactNode;
 }
 
-/** Bottom sheet on mobile, centered dialog on larger screens. */
+/** Bottom sheet on mobile (slides up, drag-handle look), centered dialog on sm+. */
 export function Modal({ title, onClose, children }: ModalProps) {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    // Lock background scroll while the sheet is open.
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.body.style.overflow = previousOverflow;
+    };
   }, [onClose]);
 
   return (
@@ -24,23 +32,31 @@ export function Modal({ title, onClose, children }: ModalProps) {
       onClick={onClose}
       role="dialog"
       aria-modal="true"
+      aria-label={title}
     >
-      <div
-        className="w-full max-w-md border bg-surface shadow-2xl"
+      <motion.div
+        variants={sheetUp}
+        initial="hidden"
+        animate="show"
+        className="w-full max-w-md rounded-t-card border bg-surface pb-[max(env(safe-area-inset-bottom),0px)] shadow-card sm:rounded-card"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b px-5 py-4">
+        {/* Drag-handle affordance (mobile sheet idiom) */}
+        <div className="flex justify-center pt-2.5 sm:hidden" aria-hidden>
+          <span className="h-1 w-9 rounded-full bg-edge" />
+        </div>
+        <div className="flex items-center justify-between px-5 py-4">
           <h2 className="text-sm font-semibold tracking-tight">{title}</h2>
           <button
             onClick={onClose}
             aria-label="Close"
-            className="text-muted transition-colors hover:text-white"
+            className="-mr-2 flex h-10 w-10 items-center justify-center rounded-btn text-muted transition-colors hover:text-white"
           >
             ✕
           </button>
         </div>
-        <div className="px-5 py-5">{children}</div>
-      </div>
+        <div className="border-t px-5 py-5">{children}</div>
+      </motion.div>
     </div>
   );
 }

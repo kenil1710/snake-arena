@@ -6,14 +6,19 @@ import type { ChainVerifier } from './chain/verify.js';
 import type { ScoreSigner } from './signer/sign.js';
 import { createSessionRouter } from './routes/session.js';
 import { createHealthRouter } from './routes/health.js';
+import { createAdminRouter, type AdminRouterDeps } from './routes/admin.js';
 import { errorHandler, notFoundHandler } from './middleware/errors.js';
-import { log } from './log.js';
+import { createLogger } from './lib/logger.js';
+
+const logger = createLogger('http');
 
 export interface AppDeps {
   config: BackendConfig;
   sessions: SessionManager;
   verifier: ChainVerifier;
   signer: ScoreSigner;
+  /** Tournament keeper; absent when CRON_ENABLED=false. */
+  finalizer?: AdminRouterDeps['finalizer'];
   /** Injectable clock for tests. */
   now?: () => number;
 }
@@ -30,7 +35,7 @@ export function createApp(deps: AppDeps): Express {
     if (req.path !== '/api/session/move') {
       const startedAt = Date.now();
       res.on('finish', () => {
-        log(`${req.method} ${req.path}`, { status: res.statusCode, ms: Date.now() - startedAt });
+        logger.info(`${req.method} ${req.path}`, { status: res.statusCode, ms: Date.now() - startedAt });
       });
     }
     next();
@@ -38,6 +43,7 @@ export function createApp(deps: AppDeps): Express {
 
   app.use('/api', createHealthRouter(deps));
   app.use('/api/session', createSessionRouter(deps));
+  app.use('/api/admin', createAdminRouter({ config: deps.config, finalizer: deps.finalizer ?? null }));
 
   app.use(notFoundHandler);
   app.use(errorHandler);

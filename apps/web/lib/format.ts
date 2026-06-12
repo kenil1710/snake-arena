@@ -26,6 +26,28 @@ export function formatTimeLeft(totalSeconds: number): string {
   return `${minutes}m ${pad(seconds)}s`;
 }
 
+/** Card-friendly countdown: "8h 16m" / "16m" / "42s" — no seconds noise above a minute. */
+export function formatTimeLeftCompact(totalSeconds: number): string {
+  if (totalSeconds <= 0) return 'Ended';
+  const days = Math.floor(totalSeconds / 86_400);
+  const hours = Math.floor((totalSeconds % 86_400) / 3_600);
+  const minutes = Math.floor((totalSeconds % 3_600) / 60);
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  if (minutes > 0) return `${minutes}m ${Math.floor(totalSeconds % 60)}s`;
+  return `${totalSeconds}s`;
+}
+
+/** Detail-page countdown: "1:23:45" (h:mm:ss) or "23:45" under an hour. */
+export function formatTimeLeftClock(totalSeconds: number): string {
+  if (totalSeconds <= 0) return '0:00';
+  const hours = Math.floor(totalSeconds / 3_600);
+  const minutes = Math.floor((totalSeconds % 3_600) / 60);
+  const seconds = Math.floor(totalSeconds % 60);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return hours > 0 ? `${hours}:${pad(minutes)}:${pad(seconds)}` : `${minutes}:${pad(seconds)}`;
+}
+
 /** "just now" / "4 min ago" / "2 h ago" / "3 d ago" from a unix-seconds time. */
 export function timeAgo(unixSeconds: number): string {
   const seconds = Math.max(0, Math.floor(Date.now() / 1000) - unixSeconds);

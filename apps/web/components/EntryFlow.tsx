@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { motion } from 'framer-motion';
 import { erc20Abi } from 'viem';
 import {
   useAccount,
@@ -15,7 +16,6 @@ import { snakeArenaAbi } from '@/lib/abis/snakeArena';
 import {
   SNAKE_ARENA_ADDRESS,
   TIER_ENUM_INDEX,
-  TIER_META,
   TOURNAMENT_TIERS,
   USDC_ADDRESS,
   type ActiveTournament,
@@ -23,7 +23,9 @@ import {
 } from '@/lib/contracts';
 import { errorMessage, formatUsdc } from '@/lib/format';
 import { TARGET_CHAIN_ID, TARGET_CHAIN_NAME } from '@/lib/wagmi';
+import { toast } from './Toast';
 import { Modal } from './ui/Modal';
+import { TierIcon } from './illustrations/TierIcon';
 
 const USERNAME_PATTERN = /^[a-zA-Z0-9]{1,20}$/;
 const FAUCET_URL = 'https://faucet.circle.com';
@@ -58,7 +60,7 @@ function PrimaryButton({
     <button
       onClick={onClick}
       disabled={disabled}
-      className="mt-5 w-full bg-accent py-2.5 text-sm font-semibold text-background transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-edge disabled:text-muted"
+      className="mt-5 flex min-h-12 w-full items-center justify-center gap-2 rounded-btn bg-accent text-sm font-bold text-background transition-all hover:bg-accent-hover hover:shadow-glow disabled:cursor-not-allowed disabled:bg-edge disabled:text-muted disabled:shadow-none"
     >
       {children}
     </button>
@@ -69,7 +71,7 @@ function Spinner() {
   return (
     <span
       aria-hidden
-      className="inline-block h-3.5 w-3.5 animate-spin border-2 border-background border-t-transparent align-[-2px]"
+      className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-background border-t-transparent"
     />
   );
 }
@@ -144,9 +146,12 @@ export function EntryFlow({ tierId, tournament, onClose }: EntryFlowProps) {
     } catch {
       // Storage unavailable (private mode) — the query param still carries it.
     }
-    const timer = setTimeout(() => router.push(`/play/${id}?entryTx=${enter.data}`), 900);
+    const timer = setTimeout(() => {
+      toast.success(`Entered ${formatUsdc(fee)} tournament — let's go 🐍`);
+      router.push(`/play/${id}?entryTx=${enter.data}`);
+    }, 900);
     return () => clearTimeout(timer);
-  }, [enterReceipt.isSuccess, enter.data, router, tournament.id]);
+  }, [enterReceipt.isSuccess, enter.data, router, tournament.id, fee]);
 
   const approving = approve.isPending || (Boolean(approve.data) && approveReceipt.isLoading);
   const entering = enter.isPending || (Boolean(enter.data) && enterReceipt.isLoading);
@@ -166,26 +171,49 @@ export function EntryFlow({ tierId, tournament, onClose }: EntryFlowProps) {
 
   return (
     <Modal title={`Enter ${config.label}`} onClose={onClose}>
-      <div className="space-y-1.5 border bg-background p-4">
-        <Row label="Tournament" value={`${TIER_META[tierId].icon} ${config.label} #${tournament.id.toString()}`} />
+      <div className="space-y-2 rounded-btn border bg-background p-4">
+        <Row
+          label="Tournament"
+          value={
+            <span className="flex items-center gap-1.5">
+              <TierIcon tierId={tierId} size={16} className="shrink-0" />
+              {config.label} #{tournament.id.toString()}
+            </span>
+          }
+        />
         <Row label="Entry fee" value={formatUsdc(fee)} />
-        <Row label="Current prize pool" value={<span className="text-accent">{formatUsdc(tournament.prizePool)}</span>} />
+        <Row
+          label="Current prize pool"
+          value={
+            <span className="font-mono font-semibold text-accent">
+              {formatUsdc(tournament.prizePool)}
+            </span>
+          }
+        />
       </div>
 
       {(failure || switchRejected) && step !== 'success' && (
-        <p className="mt-4 break-words border border-red-900 bg-red-950/40 px-3 py-2 text-xs text-red-400">
+        <p className="mt-4 break-words rounded-btn border border-danger/40 bg-danger/10 px-3 py-2 text-xs text-danger">
           {switchRejected ? `Please switch to ${TARGET_CHAIN_NAME} to play.` : failure}
         </p>
       )}
 
       {step === 'connect' && (
         <div className="mt-5 flex flex-col items-center gap-3">
-          <p className="text-sm text-muted">Connect your Coinbase Smart Wallet to enter.</p>
-          <ConnectWallet className="!rounded-none !bg-accent hover:!bg-accent-hover" />
+          <p className="text-sm text-secondary">Connect your Coinbase Smart Wallet to enter.</p>
+          <ConnectWallet className="!rounded-btn !bg-accent hover:!bg-accent-hover" />
         </div>
       )}
 
-      {step === 'loading' && <p className="mt-5 text-center text-sm text-muted">Checking your wallet…</p>}
+      {step === 'loading' && (
+        <div className="mt-5 flex items-center justify-center gap-2.5 text-sm text-muted">
+          <span
+            aria-hidden
+            className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-accent border-t-transparent"
+          />
+          Checking your wallet…
+        </div>
+      )}
 
       {step === 'balance' && (
         <div className="mt-5">
@@ -254,7 +282,7 @@ export function EntryFlow({ tierId, tournament, onClose }: EntryFlowProps) {
             placeholder="snakecharmer42"
             maxLength={20}
             autoFocus
-            className="mt-2 w-full border bg-background px-3 py-2.5 text-sm outline-none transition-colors placeholder:text-muted/50 focus:border-accent"
+            className="mt-2 min-h-12 w-full rounded-input border bg-background px-3.5 text-sm outline-none transition-colors placeholder:text-muted/50 focus:border-accent"
           />
           <p className="mt-1.5 text-xs text-muted">1–20 characters, letters and numbers only.</p>
           <PrimaryButton
@@ -303,10 +331,18 @@ export function EntryFlow({ tierId, tournament, onClose }: EntryFlowProps) {
       )}
 
       {step === 'success' && (
-        <div className="mt-5 text-center">
-          <p className="text-2xl text-accent">✓</p>
-          <p className="mt-2 text-sm font-medium">Entry confirmed</p>
-          <p className="mt-1 text-sm text-muted">Taking you to the game…</p>
+        <div className="mt-5 flex flex-col items-center text-center">
+          <motion.span
+            initial={{ scale: 0.4, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ type: 'spring', stiffness: 420, damping: 22 }}
+            className="flex h-12 w-12 items-center justify-center rounded-full border border-accent/50 bg-accent/15 text-xl text-accent shadow-glow"
+            aria-hidden
+          >
+            ✓
+          </motion.span>
+          <p className="mt-3 text-sm font-bold">Entry confirmed</p>
+          <p className="mt-1 text-sm text-secondary">Taking you to the game…</p>
         </div>
       )}
     </Modal>

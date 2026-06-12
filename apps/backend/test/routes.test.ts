@@ -24,6 +24,10 @@ const config: BackendConfig = {
   usdcAddress: USDC,
   trustedSignerPrivateKey: TEST_KEY,
   corsOrigins: ['http://localhost:3000'],
+  cronEnabled: false,
+  finalizerPrivateKey: null,
+  adminSecret: null,
+  discordWebhookUrl: null,
 };
 
 function txHash(n: number): Hex {

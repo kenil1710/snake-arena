@@ -25,13 +25,26 @@ export interface FinalizedArgs {
   payouts: readonly bigint[];
 }
 
+export interface EnteredArgs {
+  tournamentId: bigint;
+  player: Address;
+  entryNumber: bigint;
+}
+
+export interface ScoreArgs {
+  tournamentId: bigint;
+  player: Address;
+  score: bigint;
+}
+
 /**
  * Structural slice of a viem public client. wagmi and the app can resolve
  * different viem copies whose nominal PublicClient types don't unify, so the
- * scanner only asks for the two methods it calls.
+ * scanner only asks for the methods it calls.
  */
 export interface ScanClient {
   getBlockNumber(): Promise<bigint>;
+  getBlock(params: { blockNumber: bigint }): Promise<{ timestamp: bigint }>;
   getLogs(params: {
     address: Address;
     event: AbiEvent;
@@ -42,11 +55,13 @@ export interface ScanClient {
   }): Promise<{ args: unknown; blockNumber: bigint; transactionHash: Hex; logIndex: number }[]>;
 }
 
-/** Some public RPCs reject wide ranges — retry in fixed-size chunks. */
-const CHUNK_SIZE = 10_000n;
+/** Base Sepolia's public RPC caps eth_getLogs at 10k blocks — stay under it. */
+const CHUNK_SIZE = 9_000n;
+/** Backfill a few chunks at a time: fast without hammering the public RPC. */
+const PARALLEL_CHUNKS = 4;
 /** Drop caches this old and rescan from scratch (guards against bad writes). */
 const CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
-const CACHE_VERSION = 1;
+const CACHE_VERSION = 2;
 
 interface CacheShape<TArgs> {
   version: number;
@@ -93,19 +108,19 @@ async function fetchRange<TArgs>(
 ): Promise<ScannedLog<TArgs>[]> {
   const common = { address: SNAKE_ARENA_ADDRESS, event, args, strict: true } as const;
 
-  let logs;
-  try {
-    logs = await client.getLogs({ ...common, fromBlock, toBlock });
-  } catch {
-    // Range too wide for this RPC — walk it in chunks.
-    logs = [];
-    for (let start = fromBlock; start <= toBlock; start += CHUNK_SIZE) {
-      const end = start + CHUNK_SIZE - 1n > toBlock ? toBlock : start + CHUNK_SIZE - 1n;
-      logs.push(...(await client.getLogs({ ...common, fromBlock: start, toBlock: end })));
-    }
+  const ranges: { fromBlock: bigint; toBlock: bigint }[] = [];
+  for (let start = fromBlock; start <= toBlock; start += CHUNK_SIZE) {
+    const end = start + CHUNK_SIZE - 1n > toBlock ? toBlock : start + CHUNK_SIZE - 1n;
+    ranges.push({ fromBlock: start, toBlock: end });
   }
 
-  return logs.map((log) => ({
+  const chunks: Awaited<ReturnType<ScanClient['getLogs']>>[] = [];
+  for (let i = 0; i < ranges.length; i += PARALLEL_CHUNKS) {
+    const batch = ranges.slice(i, i + PARALLEL_CHUNKS);
+    chunks.push(...(await Promise.all(batch.map((range) => client.getLogs({ ...common, ...range })))));
+  }
+
+  return chunks.flat().map((log) => ({
     args: log.args as TArgs,
     blockNumber: log.blockNumber,
     transactionHash: log.transactionHash,
@@ -143,4 +158,58 @@ export async function cachedLogScan<TArgs>(params: {
   }
 
   return logs;
+}
+
+const TIMESTAMP_CACHE_KEY = 'snakearena:blocktimes:v1';
+const TIMESTAMP_CACHE_MAX = 1_000;
+
+/**
+ * Unix timestamps for a set of blocks. Block timestamps are immutable, so
+ * resolved values persist in localStorage and never refetch.
+ */
+export async function blockTimestamps(
+  client: ScanClient,
+  blockNumbers: Iterable<bigint>,
+): Promise<Map<bigint, number>> {
+  let cached: Record<string, number> = {};
+  try {
+    cached = JSON.parse(localStorage.getItem(TIMESTAMP_CACHE_KEY) ?? '{}') as Record<string, number>;
+  } catch {
+    cached = {};
+  }
+
+  const result = new Map<bigint, number>();
+  const missing: bigint[] = [];
+  for (const blockNumber of new Set(blockNumbers)) {
+    const hit = cached[blockNumber.toString()];
+    if (hit !== undefined) result.set(blockNumber, hit);
+    else missing.push(blockNumber);
+  }
+
+  if (missing.length > 0) {
+    const blocks = await Promise.all(
+      missing.map((blockNumber) => client.getBlock({ blockNumber })),
+    );
+    missing.forEach((blockNumber, index) => {
+      const timestamp = Number(blocks[index].timestamp);
+      result.set(blockNumber, timestamp);
+      cached[blockNumber.toString()] = timestamp;
+    });
+
+    // Keep the cache bounded: oldest blocks age out first.
+    const keys = Object.keys(cached);
+    if (keys.length > TIMESTAMP_CACHE_MAX) {
+      keys
+        .sort((a, b) => Number(BigInt(a) - BigInt(b)))
+        .slice(0, keys.length - TIMESTAMP_CACHE_MAX)
+        .forEach((key) => delete cached[key]);
+    }
+    try {
+      localStorage.setItem(TIMESTAMP_CACHE_KEY, JSON.stringify(cached));
+    } catch {
+      // Storage unavailable — lookups just stay uncached.
+    }
+  }
+
+  return result;
 }

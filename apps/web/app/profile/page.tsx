@@ -1,12 +1,22 @@
 'use client';
 
+import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { parseAbiItem } from 'viem';
-import { useAccount, usePublicClient, useReadContracts } from 'wagmi';
+import { useAccount, usePublicClient, useReadContract, useReadContracts } from 'wagmi';
 import { ConnectWallet } from '@coinbase/onchainkit/wallet';
+import {
+  Coins,
+  ExternalLink,
+  Gamepad2,
+  LogIn,
+  Medal,
+  Play,
+  Target,
+  Ticket,
+  Trophy,
+} from 'lucide-react';
 import { snakeArenaAbi } from '@/lib/abis/snakeArena';
 import {
-  DEPLOY_BLOCK,
   EXPLORER_URL,
   SNAKE_ARENA_ADDRESS,
   TIER_ENUM_INDEX,
@@ -15,51 +25,121 @@ import {
   type ActiveTournament,
   type PlayerEntry,
 } from '@/lib/contracts';
-import { cachedLogScan, TOURNAMENT_FINALIZED_EVENT, type FinalizedArgs } from '@/lib/events';
-import { formatUsdc, truncateAddress } from '@/lib/format';
+import {
+  blockTimestamps,
+  cachedLogScan,
+  ENTERED_TOURNAMENT_EVENT,
+  SCORE_SUBMITTED_EVENT,
+  TOURNAMENT_FINALIZED_EVENT,
+  type EnteredArgs,
+  type FinalizedArgs,
+  type ScoreArgs,
+} from '@/lib/events';
+import { formatUsdc, timeAgo, truncateAddress } from '@/lib/format';
+import { EmptyState } from '@/components/illustrations/EmptyState';
+import { TierIcon } from '@/components/illustrations/TierIcon';
+import { IdentityAvatar } from '@/components/ui/IdentityAvatar';
 
-const ENTERED_EVENT = parseAbiItem(
-  'event EnteredTournament(uint256 indexed tournamentId, address indexed player, uint256 entryNumber)',
-);
-const SCORE_EVENT = parseAbiItem(
-  'event ScoreSubmitted(uint256 indexed tournamentId, address indexed player, uint256 score)',
-);
+/** Most recent blocks per query whose timestamps we resolve for "2m ago" labels. */
+const TIMESTAMPED_ITEMS = 20;
+const ACTIVITY_ITEMS = 15;
 
-function StatBlock({ label, value }: { label: string; value: React.ReactNode }) {
+interface StatBlockProps {
+  label: string;
+  value: React.ReactNode;
+  icon: React.ReactNode;
+  /** Per-stat radial tint behind the number. */
+  tint: string;
+  loading: boolean;
+}
+
+function StatBlock({ label, value, icon, tint, loading }: StatBlockProps) {
   return (
-    <div className="border bg-surface px-5 py-4">
-      <p className="text-xs uppercase tracking-wide text-muted">{label}</p>
-      <p className="mt-1.5 text-2xl font-semibold tabular-nums">{value}</p>
+    <div className="relative overflow-hidden rounded-card border bg-surface px-4 py-4 shadow-card sm:px-5">
+      <span aria-hidden className="pointer-events-none absolute inset-0" style={{ backgroundImage: tint }} />
+      <div className="relative flex items-start justify-between gap-2">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted">{label}</p>
+        {icon}
+      </div>
+      {loading ? (
+        <div className="skeleton relative mt-2.5 h-8 w-24" />
+      ) : (
+        <p className="relative mt-2 font-mono text-[26px] font-bold tabular-nums leading-none sm:text-[32px]">
+          {value}
+        </p>
+      )}
     </div>
   );
 }
+
+function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="mt-6">
+      <h2 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted">{title}</h2>
+      <div className="mt-2.5 divide-y divide-edge overflow-hidden rounded-card border bg-surface shadow-card">
+        {children}
+      </div>
+    </section>
+  );
+}
+
+const RANK_BADGE: Record<number, string> = {
+  1: 'border-gold/40 bg-gold/15 text-gold',
+  2: 'border-silver/30 bg-silver/10 text-silver',
+  3: 'border-bronze/40 bg-bronze/15 text-bronze',
+};
+
+const MEDAL_COLOR: Record<number, string> = {
+  1: 'text-gold',
+  2: 'text-silver',
+  3: 'text-bronze',
+};
 
 export default function ProfilePage() {
   const { address, isConnected } = useAccount();
   const client = usePublicClient();
 
-  // Full on-chain history for this wallet, straight from the event logs.
+  const usernameRead = useReadContract({
+    address: SNAKE_ARENA_ADDRESS,
+    abi: snakeArenaAbi,
+    functionName: 'usernames',
+    args: address ? [address] : undefined,
+    query: { enabled: Boolean(address) },
+  });
+  const username = (usernameRead.data as string | undefined) || null;
+
+  // Full on-chain history for this wallet. cachedLogScan walks the chain in
+  // RPC-safe 9k-block chunks and persists to localStorage, so after the first
+  // visit only freshly mined blocks are fetched.
   const history = useQuery({
     queryKey: ['profile-history', address],
     enabled: Boolean(address) && Boolean(client),
     refetchInterval: 15_000,
     queryFn: async () => {
-      const common = {
-        address: SNAKE_ARENA_ADDRESS,
-        args: { player: address },
-        fromBlock: DEPLOY_BLOCK,
-        toBlock: 'latest',
-      } as const;
+      const common = { client: client!, args: { player: address } } as const;
       const [entered, scores] = await Promise.all([
-        client!.getLogs({ ...common, event: ENTERED_EVENT }),
-        client!.getLogs({ ...common, event: SCORE_EVENT }),
+        cachedLogScan<EnteredArgs>({
+          ...common,
+          event: ENTERED_TOURNAMENT_EVENT,
+          cacheKey: `entered:${address!.toLowerCase()}`,
+        }),
+        cachedLogScan<ScoreArgs>({
+          ...common,
+          event: SCORE_SUBMITTED_EVENT,
+          cacheKey: `scores:${address!.toLowerCase()}`,
+        }),
       ]);
-      return { entered, scores };
+      const recentBlocks = [...entered, ...scores]
+        .sort((a, b) => Number(b.blockNumber - a.blockNumber))
+        .slice(0, TIMESTAMPED_ITEMS)
+        .map((log) => log.blockNumber);
+      const timestamps = await blockTimestamps(client!, recentBlocks);
+      return { entered, scores, timestamps };
     },
   });
 
   const distinctIds = [
-    ...new Set((history.data?.entered ?? []).map((log) => log.args.tournamentId!)),
+    ...new Set((history.data?.entered ?? []).map((log) => log.args.tournamentId)),
   ];
 
   // Resolve each tournament's tier + entry fee to price the entries.
@@ -104,7 +184,7 @@ export default function ProfilePage() {
         event: TOURNAMENT_FINALIZED_EVENT,
         cacheKey: 'tournament-finalized',
       });
-      return logs
+      const mine = logs
         .flatMap((log) => {
           const winnerIndex = log.args.winners.findIndex(
             (winner) => winner.toLowerCase() === address!.toLowerCase(),
@@ -121,6 +201,11 @@ export default function ProfilePage() {
           ];
         })
         .sort((a, b) => Number(b.blockNumber - a.blockNumber));
+      const timestamps = await blockTimestamps(
+        client!,
+        mine.slice(0, TIMESTAMPED_ITEMS).map((win) => win.blockNumber),
+      );
+      return mine.map((win) => ({ ...win, timestamp: timestamps.get(win.blockNumber) }));
     },
   });
   const totalWinnings = wins.data?.reduce((sum, win) => sum + win.payout, 0n);
@@ -176,30 +261,58 @@ export default function ProfilePage() {
 
   const totalEntries = history.data?.entered.length;
   const totalSpent = history.data?.entered.reduce(
-    (sum, log) => sum + (tournamentInfo.get(log.args.tournamentId!)?.entryFee ?? 0n),
+    (sum, log) => sum + (tournamentInfo.get(log.args.tournamentId)?.entryFee ?? 0n),
     0n,
   );
   const bestScore = history.data?.scores.reduce(
-    (max, log) => ((log.args.score ?? 0n) > max ? log.args.score! : max),
+    (max, log) => ((log.args.score ?? 0n) > max ? log.args.score : max),
     0n,
   );
 
+  // Entries, scores, and wins interleaved into one feed, newest first.
+  const eventTimestamps = history.data?.timestamps;
   const activity = [
     ...(history.data?.entered.map((log) => ({
       kind: 'entry' as const,
       blockNumber: log.blockNumber,
       logIndex: log.logIndex,
       txHash: log.transactionHash,
-      tournamentId: log.args.tournamentId,
-      detail: `Entry #${log.args.entryNumber?.toString() ?? '?'}`,
+      timestamp: eventTimestamps?.get(log.blockNumber),
+      label: (
+        <>
+          Entered <span className="font-medium text-white">{tierLabelOf(log.args.tournamentId)}</span>
+          <span className="text-muted">
+            {' '}
+            — {formatUsdc(tournamentInfo.get(log.args.tournamentId)?.entryFee ?? 0n)}
+          </span>
+        </>
+      ),
     })) ?? []),
     ...(history.data?.scores.map((log) => ({
       kind: 'score' as const,
       blockNumber: log.blockNumber,
       logIndex: log.logIndex,
       txHash: log.transactionHash,
-      tournamentId: log.args.tournamentId,
-      detail: `Score ${log.args.score?.toString() ?? '?'}`,
+      timestamp: eventTimestamps?.get(log.blockNumber),
+      label: (
+        <>
+          Submitted <span className="font-mono font-semibold text-white">{log.args.score.toString()} pts</span> in{' '}
+          <span className="font-medium text-white">{tierLabelOf(log.args.tournamentId)}</span>
+        </>
+      ),
+    })) ?? []),
+    ...(wins.data?.map((win) => ({
+      kind: 'win' as const,
+      blockNumber: win.blockNumber,
+      logIndex: -1,
+      txHash: win.txHash,
+      timestamp: win.timestamp,
+      label: (
+        <>
+          Won <span className="font-mono font-semibold text-gold">{formatUsdc(win.payout)}</span> in{' '}
+          <span className="font-medium text-white">{tierLabelOf(win.tournamentId)}</span>
+        </>
+      ),
     })) ?? []),
   ]
     .sort((a, b) =>
@@ -207,159 +320,267 @@ export default function ProfilePage() {
         ? b.logIndex - a.logIndex
         : Number(b.blockNumber - a.blockNumber),
     )
-    .slice(0, 15);
+    .slice(0, ACTIVITY_ITEMS);
+
+  const ACTIVITY_ICON: Record<'entry' | 'score' | 'win', { Icon: typeof LogIn; classes: string }> = {
+    entry: { Icon: LogIn, classes: 'border-live/30 bg-live/10 text-live' },
+    score: { Icon: Gamepad2, classes: 'border-sky-500/30 bg-sky-500/10 text-sky-400' },
+    win: { Icon: Trophy, classes: 'border-gold/30 bg-gold/10 text-gold' },
+  };
 
   if (!isConnected || !address) {
     return (
-      <main className="mx-auto flex max-w-2xl flex-col items-center gap-4 px-4 py-24 text-center">
-        <h1 className="text-xl font-semibold tracking-tight">Profile</h1>
-        <p className="text-sm text-muted">Connect your wallet to see your tournament history.</p>
-        <ConnectWallet className="!rounded-none !bg-accent hover:!bg-accent-hover" />
+      <main className="mx-auto flex max-w-2xl flex-col items-center px-4 py-20 text-center">
+        <EmptyState
+          illustration="wallet"
+          size={80}
+          title="Connect wallet to see your stats"
+          body="Your entries, scores, and winnings live on-chain — connect to pull them up."
+          action={<ConnectWallet className="!rounded-btn !bg-accent hover:!bg-accent-hover" />}
+        />
       </main>
     );
   }
 
   return (
-    <main className="mx-auto w-full max-w-3xl px-4 py-8">
-      <h1 className="text-2xl font-semibold tracking-tight">Profile</h1>
-      <p className="mt-1 text-sm text-muted">{truncateAddress(address)} on Base Sepolia</p>
+    <main className="mx-auto w-full max-w-3xl px-4 py-6 pb-[max(env(safe-area-inset-bottom),1.5rem)] sm:py-8">
+      {/* Identity header */}
+      <section className="flex items-center gap-4">
+        <IdentityAvatar seed={address} size={64} className="shrink-0 ring-2 ring-accent/25" />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+            <h1 className="max-w-full truncate text-2xl font-bold tracking-tight">
+              {username ?? truncateAddress(address)}
+            </h1>
+            <span className="flex items-center gap-1.5 rounded-full border border-accent/20 bg-accent/[0.06] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-accent">
+              <span className="animate-live-dot inline-flex h-1.5 w-1.5 rounded-full bg-accent" aria-hidden />
+              Base Sepolia
+            </span>
+          </div>
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+            {username && <span className="font-mono text-secondary">{truncateAddress(address)}</span>}
+            <a
+              href={`${EXPLORER_URL}/address/${address}`}
+              target="_blank"
+              rel="noreferrer"
+              className="flex items-center gap-1 text-muted transition-colors hover:text-accent"
+            >
+              View on Basescan <ExternalLink size={11} aria-hidden />
+            </a>
+          </div>
+        </div>
+      </section>
 
-      <section className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
+      {/* Stats — 2x2 on mobile, 4-up on desktop */}
+      <section className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">
         <StatBlock
           label="Total winnings"
+          icon={<Trophy size={15} className="text-gold/80" aria-hidden />}
+          tint="radial-gradient(circle at top right, rgba(251,191,36,0.10) 0%, transparent 60%)"
+          loading={wins.isLoading}
           value={
             totalWinnings === undefined ? (
               '—'
             ) : (
-              <span className="text-accent">{formatUsdc(totalWinnings)}</span>
+              <span className="text-gradient-teal text-glow-prize">{formatUsdc(totalWinnings)}</span>
             )
           }
         />
-        <StatBlock label="Total entries" value={totalEntries ?? '—'} />
         <StatBlock
-          label="Total entry spend"
+          label="Total entries"
+          icon={<Ticket size={15} className="text-accent/80" aria-hidden />}
+          tint="radial-gradient(circle at top right, rgba(45,212,191,0.10) 0%, transparent 60%)"
+          loading={history.isLoading}
+          value={totalEntries ?? '—'}
+        />
+        <StatBlock
+          label="Entry spend"
+          icon={<Coins size={15} className="text-danger/70" aria-hidden />}
+          tint="radial-gradient(circle at top right, rgba(239,68,68,0.09) 0%, transparent 60%)"
+          loading={history.isLoading || (distinctIds.length > 0 && tournamentReads.isLoading)}
           value={totalSpent === undefined ? '—' : formatUsdc(totalSpent)}
         />
-        <StatBlock label="Best score" value={bestScore === undefined ? '—' : bestScore.toString()} />
+        <StatBlock
+          label="Best score"
+          icon={<Target size={15} className="text-cyan/80" aria-hidden />}
+          tint="radial-gradient(circle at top right, rgba(6,182,212,0.10) 0%, transparent 60%)"
+          loading={history.isLoading}
+          value={bestScore === undefined ? '—' : bestScore.toString()}
+        />
       </section>
 
-      <section className="mt-8">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
-          Active tournaments
-        </h2>
-        <div className="mt-3 divide-y divide-edge border bg-surface">
-          {activeReads.isLoading && (
-            <p className="px-4 py-5 text-center text-sm text-muted">Loading…</p>
-          )}
-          {!activeReads.isLoading && activeRanks.length === 0 && (
-            <p className="px-4 py-5 text-center text-sm text-muted">
-              Not entered in any active tournament — pick one in the lobby.
-            </p>
-          )}
-          {activeRanks.map(({ tournament, tierId, rank, playerCount }) => (
-            <a
-              key={tournament.id.toString()}
-              href={`/leaderboard/${tournament.id.toString()}`}
-              className="flex items-center justify-between gap-3 px-4 py-3 text-sm transition-colors hover:bg-edge/40"
-            >
-              <span className="font-medium">{TOURNAMENT_TIERS[tierId].label}</span>
-              <span className="tabular-nums text-muted">
-                {rank !== null ? (
-                  <>
-                    <span className={rank <= 3 ? 'font-semibold text-accent' : 'text-white'}>
-                      #{rank}
-                    </span>{' '}
-                    of {playerCount}
-                  </>
-                ) : (
-                  'no score yet'
-                )}
-              </span>
-            </a>
-          ))}
-        </div>
-      </section>
-
-      <section className="mt-8">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Win history</h2>
-        <div className="mt-3 divide-y divide-edge border bg-surface">
-          {wins.isLoading && <p className="px-4 py-5 text-center text-sm text-muted">Scanning…</p>}
-          {wins.isSuccess && wins.data.length === 0 && (
-            <p className="px-4 py-5 text-center text-sm text-muted">
-              No wins yet — top 3 when a tournament closes pays out automatically.
-            </p>
-          )}
-          {(wins.data ?? []).map((win) => (
-            <div
-              key={`${win.txHash}-${win.tournamentId.toString()}`}
-              className="flex items-center justify-between gap-3 px-4 py-3 text-sm"
-            >
-              <span>
-                <span className="font-semibold tabular-nums text-accent">
-                  {formatUsdc(win.payout)}
-                </span>{' '}
-                · {['🥇', '🥈', '🥉'][win.place - 1] ?? `#${win.place}`} in{' '}
-                {tierLabelOf(win.tournamentId)}
-              </span>
-              <a
-                href={`${EXPLORER_URL}/tx/${win.txHash}`}
-                target="_blank"
-                rel="noreferrer"
-                className="shrink-0 text-xs text-muted transition-colors hover:text-accent"
-              >
-                tx ↗
-              </a>
+      <SectionCard title="Active tournaments">
+        {activeReads.isLoading && (
+          <div className="space-y-2.5 p-4">
+            {[0, 1].map((index) => (
+              <div key={index} className="skeleton h-10 w-full" />
+            ))}
+          </div>
+        )}
+        {!activeReads.isLoading && activeRanks.length === 0 && (
+          <p className="px-4 py-6 text-center text-sm text-muted">
+            You haven&apos;t entered any active tournaments yet.{' '}
+            <Link href="/" className="text-accent transition-colors hover:text-accent-hover">
+              Browse the lobby
+            </Link>
+            .
+          </p>
+        )}
+        {activeRanks.map(({ tournament, tierId, rank, playerCount }) => (
+          <div
+            key={tournament.id.toString()}
+            className="flex min-h-14 items-center gap-3 px-4 py-3"
+          >
+            <TierIcon tierId={tierId} size={28} className="shrink-0" />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium">{TOURNAMENT_TIERS[tierId].label}</p>
+              <p className="text-xs tabular-nums text-muted">
+                {rank !== null ? `of ${playerCount} players` : 'no score yet'}
+              </p>
             </div>
-          ))}
-        </div>
-      </section>
+            {rank !== null && (
+              <span
+                className={`flex h-7 min-w-7 shrink-0 items-center justify-center rounded-full border px-1.5 font-mono text-xs font-bold tabular-nums ${
+                  RANK_BADGE[rank] ?? 'border-edge text-white'
+                }`}
+              >
+                #{rank}
+              </span>
+            )}
+            <Link
+              href={`/play/${tournament.id.toString()}`}
+              className="btn-sheen flex h-9 shrink-0 items-center gap-1.5 rounded-btn px-3 text-xs font-bold text-background transition-shadow hover:shadow-glow"
+            >
+              <Play size={12} fill="currentColor" aria-hidden /> Play
+            </Link>
+            <Link
+              href={`/leaderboard/${tournament.id.toString()}`}
+              aria-label="Leaderboard"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-btn border border-accent/40 text-accent transition-colors hover:border-accent hover:bg-accent/10"
+            >
+              <Trophy size={14} aria-hidden />
+            </Link>
+          </div>
+        ))}
+      </SectionCard>
 
-      <section className="mt-8">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Recent activity</h2>
-        <div className="mt-3 divide-y divide-edge border bg-surface">
-          {history.isLoading && (
-            <p className="px-4 py-6 text-center text-sm text-muted">Scanning on-chain history…</p>
-          )}
-          {history.isError && (
-            <p className="px-4 py-6 text-center text-sm text-red-400">
-              Could not load events from the RPC. Refresh to retry.
-            </p>
-          )}
-          {history.isSuccess && activity.length === 0 && (
-            <p className="px-4 py-6 text-center text-sm text-muted">
-              No activity yet — enter a tournament from the lobby.
-            </p>
-          )}
-          {activity.map((item) => (
+      <SectionCard title="Win history">
+        {wins.isLoading && (
+          <div className="p-4">
+            <div className="skeleton h-10 w-full" />
+          </div>
+        )}
+        {wins.isSuccess && wins.data.length === 0 && (
+          <EmptyState
+            illustration="snake"
+            body={
+              <>
+                No wins yet — your first one could be next 🐍 Top 3 pays out automatically when a
+                tournament closes.
+              </>
+            }
+          />
+        )}
+        {wins.isSuccess && wins.data.length > 0 && (
+          <div className="relative px-4 py-2">
+            {/* Timeline spine */}
+            <span aria-hidden className="absolute bottom-6 left-[29.5px] top-6 w-px bg-edge" />
+            {wins.data.map((win) => (
+              <div
+                key={`${win.txHash}-${win.tournamentId.toString()}`}
+                className="relative flex items-center gap-3 py-2.5"
+              >
+                <span className="bg-gradient-gold relative z-10 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-gold/40">
+                  <Medal size={13} className={MEDAL_COLOR[win.place] ?? 'text-gold'} aria-hidden />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm">
+                    <span className="font-mono font-semibold tabular-nums text-gold">
+                      {formatUsdc(win.payout)}
+                    </span>{' '}
+                    <span className="text-secondary">
+                      · {['1st', '2nd', '3rd'][win.place - 1] ?? `#${win.place}`} in{' '}
+                      {tierLabelOf(win.tournamentId)}
+                    </span>
+                  </p>
+                  {win.timestamp && <p className="text-xs text-muted">{timeAgo(win.timestamp)}</p>}
+                </div>
+                <a
+                  href={`${EXPLORER_URL}/tx/${win.txHash}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-label="View transaction"
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted transition-colors hover:text-accent"
+                >
+                  <ExternalLink size={13} aria-hidden />
+                </a>
+              </div>
+            ))}
+          </div>
+        )}
+      </SectionCard>
+
+      <SectionCard title="Recent activity">
+        {history.isLoading && (
+          <div className="space-y-2.5 p-4">
+            {[0, 1, 2].map((index) => (
+              <div key={index} className="skeleton h-10 w-full" />
+            ))}
+          </div>
+        )}
+        {history.isError && (
+          <EmptyState
+            illustration="disconnected"
+            title="Could not load your activity"
+            body="The RPC dropped the connection while reading your history. It usually works on a retry."
+            action={
+              <button
+                onClick={() => history.refetch()}
+                className="flex min-h-10 items-center justify-center rounded-btn border border-accent/40 px-4 text-sm font-semibold text-accent transition-colors hover:border-accent hover:bg-accent/10"
+              >
+                Retry
+              </button>
+            }
+          />
+        )}
+        {history.isSuccess && activity.length === 0 && (
+          <p className="px-4 py-6 text-center text-sm text-muted">
+            No activity yet —{' '}
+            <Link href="/" className="text-accent transition-colors hover:text-accent-hover">
+              enter a tournament from the lobby
+            </Link>
+            .
+          </p>
+        )}
+        {activity.map((item) => {
+          const { Icon, classes } = ACTIVITY_ICON[item.kind];
+          return (
             <div
               key={`${item.txHash}-${item.kind}-${item.logIndex}`}
-              className="flex items-center justify-between gap-3 px-4 py-3 text-sm"
+              className="flex min-h-12 items-center gap-3 px-4 py-2.5 text-sm"
             >
-              <div className="flex items-center gap-3">
-                <span
-                  className={`inline-block h-1.5 w-1.5 ${item.kind === 'entry' ? 'bg-accent' : 'bg-amber-400'}`}
-                  aria-hidden
-                />
-                <span>
-                  {item.kind === 'entry' ? 'Entered' : item.detail + ' in'}{' '}
-                  <span className="font-medium">{tierLabelOf(item.tournamentId)}</span>
-                  {item.kind === 'entry' && (
-                    <span className="text-muted"> · {item.detail}</span>
-                  )}
-                </span>
+              <span
+                className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full border ${classes}`}
+              >
+                <Icon size={13} aria-hidden />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[13px] text-secondary">{item.label}</p>
+                {item.timestamp && <p className="text-xs text-muted">{timeAgo(item.timestamp)}</p>}
               </div>
               <a
                 href={`${EXPLORER_URL}/tx/${item.txHash}`}
                 target="_blank"
                 rel="noreferrer"
-                className="shrink-0 text-xs text-muted transition-colors hover:text-accent"
+                aria-label="View transaction"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted transition-colors hover:text-accent"
               >
-                tx ↗
+                <ExternalLink size={13} aria-hidden />
               </a>
             </div>
-          ))}
-        </div>
-      </section>
+          );
+        })}
+      </SectionCard>
     </main>
   );
 }

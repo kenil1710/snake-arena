@@ -34,13 +34,13 @@ export function NetworkGuard({ children }: { children: React.ReactNode }) {
           <button
             onClick={() => switchChain({ chainId: TARGET_CHAIN_ID })}
             disabled={isPending}
-            className="shrink-0 bg-accent px-4 py-2 text-sm font-semibold text-background transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-edge disabled:text-muted"
+            className="shrink-0 rounded-btn bg-accent px-4 py-2 text-sm font-semibold text-background transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-edge disabled:text-muted"
           >
             {isPending ? (
               <>
                 <span
                   aria-hidden
-                  className="mr-1.5 inline-block h-3 w-3 animate-spin border-2 border-background border-t-transparent align-[-1px]"
+                  className="mr-1.5 inline-block h-3 w-3 animate-spin rounded-full border-2 border-background border-t-transparent align-[-1px]"
                 />
                 Switching to {TARGET_CHAIN_NAME}…
               </>

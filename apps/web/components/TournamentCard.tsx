@@ -1,6 +1,10 @@
 'use client';
 
+import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { motion } from 'framer-motion';
+import { Play, Trophy } from 'lucide-react';
 import {
   TIER_META,
   TOURNAMENT_TIERS,
@@ -8,7 +12,11 @@ import {
   type TournamentTierId,
 } from '@/lib/contracts';
 import { formatUsdc } from '@/lib/format';
+import { fadeUp, springFast } from '@/lib/animations';
+import { TierIcon, TIER_ACCENT } from '@/components/illustrations/TierIcon';
 import { Countdown } from './Countdown';
+
+const ENDING_SOON_S = 5 * 60;
 
 export interface TopPlayerTeaser {
   name: string;
@@ -22,7 +30,35 @@ interface TournamentCardProps {
   entryCount: bigint | undefined;
   /** Top 3 ranked players, best first (empty until someone scores). */
   top3: TopPlayerTeaser[];
+  /** Wallet connected? Drives the CTA copy for visitors. */
+  connected: boolean;
   onEnter: () => void;
+}
+
+/** Seconds until endTime, ticking — drives the "ending soon" treatment. */
+function useSecondsLeft(endTime: bigint | undefined): number | null {
+  const [now, setNow] = useState<number | null>(null);
+  useEffect(() => {
+    setNow(Math.floor(Date.now() / 1000));
+    const timer = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  if (endTime === undefined || now === null) return null;
+  return Number(endTime) - now;
+}
+
+function CardSkeleton() {
+  return (
+    <div className="rounded-card border bg-surface p-5 shadow-card sm:p-6">
+      <div className="flex items-center justify-between">
+        <div className="skeleton h-5 w-24" />
+        <div className="skeleton h-10 w-10 rounded-full" />
+      </div>
+      <div className="skeleton mt-6 h-10 w-32" />
+      <div className="skeleton mt-3 h-4 w-44" />
+      <div className="skeleton mt-6 h-12 w-full rounded-btn" />
+    </div>
+  );
 }
 
 export function TournamentCard({
@@ -30,106 +66,157 @@ export function TournamentCard({
   tournament,
   entryCount,
   top3,
+  connected,
   onEnter,
 }: TournamentCardProps) {
   const router = useRouter();
   const config = TOURNAMENT_TIERS[tierId];
   const meta = TIER_META[tierId];
+  const accent = TIER_ACCENT[tierId];
   const entered = (entryCount ?? 0n) > 0n;
   const leader = top3[0];
+  const hourly = config.durationHours === 1;
+  const secondsLeft = useSecondsLeft(tournament?.endTime);
+  const endingSoon = secondsLeft !== null && secondsLeft > 0 && secondsLeft < ENDING_SOON_S;
+  const playerCount = tournament?.players.length ?? 0;
 
-  const openLeaderboard = () => {
-    if (tournament) router.push(`/leaderboard/${tournament.id.toString()}`);
-  };
+  if (!tournament) return <CardSkeleton />;
+
+  const idPath = tournament.id.toString();
+  const openLeaderboard = () => router.push(`/leaderboard/${idPath}`);
 
   return (
-    <div
+    <motion.div
+      variants={fadeUp}
+      whileHover={{ rotateX: 2, y: -3 }}
+      whileTap={{ scale: 0.97 }}
+      transition={springFast}
+      style={{ transformPerspective: 900 }}
       onClick={openLeaderboard}
-      className={`group flex flex-col border bg-surface p-5 transition-colors hover:border-accent/40 ${
-        tournament ? 'cursor-pointer' : ''
+      className={`group relative flex cursor-pointer flex-col overflow-hidden rounded-card border bg-surface p-5 pt-6 shadow-card transition-[border-color,box-shadow] duration-200 hover:shadow-card-hover sm:p-6 sm:pt-7 ${
+        endingSoon ? 'animate-pulse border-danger/70' : 'hover:border-accent/60'
       }`}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="flex items-center gap-2 text-sm font-semibold">
-            <span aria-hidden>{meta.icon}</span>
+      {/* Tier racing stripe */}
+      <span
+        aria-hidden
+        className="absolute inset-x-0 top-0 h-[3px]"
+        style={{ backgroundImage: `linear-gradient(90deg, transparent 0%, ${accent} 35%, ${accent} 65%, transparent 100%)` }}
+      />
+      {/* Corner wash in the tier color — intensifies on hover */}
+      <span
+        aria-hidden
+        className="pointer-events-none absolute inset-0 opacity-60 transition-opacity duration-300 group-hover:opacity-100"
+        style={{ backgroundImage: `radial-gradient(circle at top right, ${accent}1f 0%, transparent 55%)` }}
+      />
+
+      {/* Header row */}
+      <div className="relative flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="flex flex-wrap items-center gap-2 text-base font-bold tracking-tight">
             {config.label}
+            {endingSoon ? (
+              <span className="rounded-full border border-danger/50 bg-danger/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-danger">
+                Ending soon
+              </span>
+            ) : (
+              <span
+                className={`rounded-full border px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider ${
+                  hourly ? 'border-gold/40 bg-gold/10 text-gold' : 'border-edge text-muted'
+                }`}
+              >
+                {hourly ? 'Hourly' : 'Daily'}
+              </span>
+            )}
           </p>
-          <p className="mt-1 text-xs text-muted">{meta.tagline}</p>
+          <p className="mt-1 text-[13px] text-muted">{meta.tagline}</p>
         </div>
-        <span className="border px-2 py-0.5 text-[10px] uppercase tracking-wide text-muted">
-          {config.durationHours === 1 ? 'Hourly' : 'Daily'}
-        </span>
+        <TierIcon tierId={tierId} size={44} className="shrink-0 drop-shadow-[0_0_10px_rgba(0,0,0,0.4)]" />
       </div>
 
-      <p className="mt-5 text-4xl font-semibold tabular-nums text-accent">
-        {tournament ? formatUsdc(tournament.prizePool) : '—'}
+      {/* Prize pool — the centerpiece */}
+      <p className="relative mt-5 text-[11px] font-semibold uppercase tracking-[0.15em] text-accent">
+        Prize pool
       </p>
-      <p className="text-xs text-muted">prize pool</p>
+      <p className="text-gradient-teal text-glow-prize relative mt-1 font-mono text-4xl font-bold tabular-nums leading-none">
+        {formatUsdc(tournament.prizePool)}
+      </p>
 
-      <dl className="mt-4 space-y-1.5 text-sm">
-        <div className="flex items-center justify-between">
-          <dt className="text-muted">Ends in</dt>
-          <dd>{tournament ? <Countdown endTime={tournament.endTime} /> : '—'}</dd>
+      {/* Micro-stats */}
+      <div className="relative mt-4 flex flex-wrap items-center gap-2.5">
+        <span className="flex items-center gap-1.5 rounded-full border border-live/30 bg-live/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-live">
+          <span className="animate-live-dot inline-flex h-1.5 w-1.5 rounded-full bg-live" aria-hidden />
+          <span className="tabular-nums">
+            {playerCount} {playerCount === 1 ? 'player' : 'players'}
+          </span>
+        </span>
+        <Countdown endTime={tournament.endTime} className="text-sm" />
+        {entered && (
+          <span className="text-[13px] font-semibold tabular-nums text-accent">
+            {entryCount!.toString()} {entryCount === 1n ? 'entry' : 'entries'}
+          </span>
+        )}
+      </div>
+
+      {/* Current leader */}
+      {leader && (
+        <div className="bg-gradient-gold relative mt-3 rounded-btn border border-gold/25 px-3 py-2">
+          <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-gold/80">
+            Current leader
+          </p>
+          <div className="mt-1 flex items-center gap-2 text-[13px]">
+            <Trophy size={14} className="shrink-0 text-gold" aria-hidden />
+            <span className="min-w-0 truncate font-medium">{leader.name}</span>
+            <span className="ml-auto shrink-0 font-mono font-semibold tabular-nums text-gold">
+              {leader.score.toString()} PTS
+            </span>
+          </div>
         </div>
-        <div className="flex items-center justify-between">
-          <dt className="text-muted">Players</dt>
-          <dd className="tabular-nums">
-            {tournament ? (
+      )}
+
+      {/* CTA row — entered players get Play Now + Leaderboard side by side */}
+      <div className="relative mt-5 flex gap-2.5" onClick={(event) => event.stopPropagation()}>
+        {entered ? (
+          <>
+            <Link
+              href={`/play/${idPath}`}
+              className="btn-sheen flex min-h-12 flex-1 items-center justify-center gap-2 rounded-btn text-sm font-bold text-background transition-shadow hover:shadow-glow"
+            >
+              <Play size={15} fill="currentColor" aria-hidden /> Play Now
+            </Link>
+            <button
+              onClick={openLeaderboard}
+              className="flex min-h-12 flex-1 items-center justify-center gap-2 rounded-btn border border-accent/40 text-sm font-semibold text-accent transition-colors hover:border-accent hover:bg-accent/10"
+            >
+              <Trophy size={15} aria-hidden /> Leaderboard
+            </button>
+          </>
+        ) : (
+          <button
+            onClick={onEnter}
+            className={`flex min-h-12 w-full items-center justify-center gap-2 rounded-btn text-sm font-bold transition-all ${
+              connected
+                ? 'btn-sheen text-background hover:shadow-glow'
+                : 'border border-edge bg-surface-elevated text-secondary hover:border-accent/50 hover:text-white'
+            }`}
+          >
+            {connected ? (
               <>
-                <span className="mr-1 text-accent" aria-hidden>
-                  ●
-                </span>
-                {tournament.players.length} in
+                <Play size={15} fill="currentColor" aria-hidden />
+                Enter {formatUsdc(tournament.entryFee)}
               </>
             ) : (
-              '—'
+              'Connect to enter'
             )}
-          </dd>
-        </div>
-        {leader && (
-          <div className="flex items-center justify-between">
-            <dt className="text-muted">🏆 Leading</dt>
-            <dd className="max-w-[55%] truncate">
-              {leader.name} <span className="tabular-nums text-muted">({leader.score.toString()} pts)</span>
-            </dd>
-          </div>
+          </button>
         )}
-        {entryCount !== undefined && (
-          <div className="flex items-center justify-between">
-            <dt className="text-muted">Your entries</dt>
-            <dd className="tabular-nums">
-              {entryCount.toString()}
-              {entered && <span className="ml-1.5 text-accent">●</span>}
-            </dd>
-          </div>
-        )}
-      </dl>
+      </div>
 
-      <button
-        onClick={(event) => {
-          event.stopPropagation();
-          if (entered) openLeaderboard();
-          else onEnter();
-        }}
-        disabled={!tournament}
-        className="mt-5 w-full bg-accent py-2.5 text-sm font-semibold text-background transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-edge disabled:text-muted"
-      >
-        {!tournament
-          ? 'Loading…'
-          : entered
-            ? 'View Leaderboard'
-            : `Enter ${formatUsdc(tournament.entryFee)}`}
-      </button>
-
-      {top3.length > 0 && (
-        <p className="mt-3 truncate text-xs text-muted">
-          Top 3:{' '}
-          {top3
-            .map((player, index) => `${['🥇', '🥈', '🥉'][index]} ${player.name}`)
-            .join('  ')}
+      {top3.length > 1 && (
+        <p className="relative mt-3 truncate text-xs text-muted">
+          {top3.map((player, index) => `${['🥇', '🥈', '🥉'][index]} ${player.name}`).join('   ')}
         </p>
       )}
-    </div>
+    </motion.div>
   );
 }

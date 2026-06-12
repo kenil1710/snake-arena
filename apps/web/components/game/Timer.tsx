@@ -21,8 +21,8 @@ export function Timer({ endTime }: { endTime: bigint | undefined }) {
 
   return (
     <span
-      className={`text-sm tabular-nums ${
-        urgent ? 'animate-pulse font-semibold text-red-400' : 'text-muted'
+      className={`font-mono text-sm tabular-nums ${
+        urgent ? 'animate-pulse font-semibold text-danger' : 'text-muted'
       }`}
     >
       {secondsLeft <= 0 ? 'Tournament ended' : `Ends in ${formatTimeLeft(secondsLeft)}`}
