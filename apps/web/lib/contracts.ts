@@ -37,12 +37,52 @@ export const DEPLOY_BLOCK = BigInt(process.env.NEXT_PUBLIC_DEPLOY_BLOCK ?? '4267
 export { TIER_ENUM_INDEX, TOURNAMENT_TIER_IDS, TOURNAMENT_TIERS };
 export type { TournamentTierId };
 
-/** Per-tier presentation bits that don't belong in the shared package. */
-export const TIER_META: Record<TournamentTierId, { icon: string; tagline: string }> = {
-  '1usd_daily': { icon: '🌱', tagline: 'Mass market — everyone plays' },
-  '5usd_daily': { icon: '⚔️', tagline: 'Mid stakes, serious snakes' },
-  '25usd_daily': { icon: '🐋', tagline: 'Whale pool — big pots' },
-  '1usd_hourly': { icon: '⚡', tagline: 'Fresh pot every hour' },
+/**
+ * Per-tier presentation bits that don't belong in the shared package.
+ * `displayName` is a UI-only label (contracts/tiers are unchanged); `coinBg` /
+ * `coinFg` color the level-select coin badge on each card.
+ */
+export interface TierMeta {
+  icon: string;
+  tagline: string;
+  displayName: string;
+  /** Coin-badge fill + text — see Night Garden palette. */
+  coinBg: string;
+  coinFg: string;
+  /** Hourly tier wears a little lightning mark on its badge. */
+  lightning?: boolean;
+}
+
+export const TIER_META: Record<TournamentTierId, TierMeta> = {
+  '1usd_daily': {
+    icon: '🌱',
+    tagline: 'Everyone starts here',
+    displayName: 'Daily Classic',
+    coinBg: '#EF9F27',
+    coinFg: '#412402',
+  },
+  '5usd_daily': {
+    icon: '⚔️',
+    tagline: 'Mid stakes, real snakes',
+    displayName: 'High Stakes',
+    coinBg: '#F0997B',
+    coinFg: '#4A1B0C',
+  },
+  '25usd_daily': {
+    icon: '🐋',
+    tagline: 'Whale pool — big pots',
+    displayName: 'Whale Pool',
+    coinBg: '#9FE1CB',
+    coinFg: '#04342C',
+  },
+  '1usd_hourly': {
+    icon: '⚡',
+    tagline: 'Fresh pot every hour',
+    displayName: 'Hourly Rush',
+    coinBg: '#EF9F27',
+    coinFg: '#412402',
+    lightning: true,
+  },
 };
 
 /** Shape of SnakeArena.getActiveTournament / getTournament. */

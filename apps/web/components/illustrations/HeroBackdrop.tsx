@@ -1,25 +1,25 @@
 'use client';
 
 /**
- * The lobby hero's atmosphere layer: soft teal/cyan orbs drifting on a slow
- * loop behind the headline. Pre-blurred radial gradients (no CSS filter) so
- * it stays cheap on mobile GPUs; the page-level grid shows through.
+ * The lobby hero's atmosphere layer: soft mint + warm-gold orbs drifting on a
+ * slow loop behind the headline. Pre-blurred radial gradients (no CSS filter)
+ * so it stays cheap on mobile GPUs; the page-level grid shows through.
  */
 export function HeroBackdrop() {
   return (
     <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
       <div
         className="animate-orb absolute -top-[20%] left-[4%] h-[26rem] w-[26rem] rounded-full"
-        style={{ background: 'radial-gradient(circle, rgba(45,212,191,0.14) 0%, transparent 62%)' }}
+        style={{ background: 'radial-gradient(circle, rgba(93,202,165,0.16) 0%, transparent 62%)' }}
       />
       <div
         className="animate-orb-slow absolute -right-[12%] top-[6%] h-[30rem] w-[30rem] rounded-full"
-        style={{ background: 'radial-gradient(circle, rgba(6,182,212,0.13) 0%, transparent 62%)' }}
+        style={{ background: 'radial-gradient(circle, rgba(239,159,39,0.10) 0%, transparent 62%)' }}
       />
       <div
         className="animate-orb absolute -bottom-[34%] left-[30%] h-[24rem] w-[24rem] rounded-full"
         style={{
-          background: 'radial-gradient(circle, rgba(45,212,191,0.09) 0%, transparent 65%)',
+          background: 'radial-gradient(circle, rgba(29,158,117,0.12) 0%, transparent 65%)',
           animationDelay: '-6s',
         }}
       />

@@ -143,10 +143,10 @@ export function WinnersFeed() {
               layout
               initial={
                 seededRef.current
-                  ? { opacity: 0, x: 28, boxShadow: '0 0 22px rgba(251,191,36,0.45)' }
+                  ? { opacity: 0, x: 28, boxShadow: '0 0 22px rgba(239,159,39,0.5)' }
                   : false
               }
-              animate={{ opacity: 1, x: 0, boxShadow: '0 0 0px rgba(251,191,36,0)' }}
+              animate={{ opacity: 1, x: 0, boxShadow: '0 0 0px rgba(239,159,39,0)' }}
               transition={{
                 opacity: { duration: 0.35, ease: 'easeOut' },
                 x: { duration: 0.35, ease: 'easeOut' },

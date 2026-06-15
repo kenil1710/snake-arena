@@ -12,14 +12,17 @@ import {
   type PlayerEntry,
   type TournamentTierId,
 } from '@/lib/contracts';
+import { Play } from 'lucide-react';
 import { truncateAddress } from '@/lib/format';
-import { staggerContainer } from '@/lib/animations';
+import { springFast, staggerContainer } from '@/lib/animations';
 import { StatsBanner } from '@/components/StatsBanner';
 import { TournamentCard, type TopPlayerTeaser } from '@/components/TournamentCard';
 import { EntryFlow } from '@/components/EntryFlow';
 import { NetworkGuard } from '@/components/NetworkGuard';
 import { WinnersFeed } from '@/components/WinnersFeed';
 import { HeroBackdrop } from '@/components/illustrations/HeroBackdrop';
+import { Mascot } from '@/components/illustrations/Mascot';
+import { Bush } from '@/components/illustrations/Bush';
 
 const REFETCH_MS = 10_000;
 const EVENT_REFETCH_DEBOUNCE_MS = 500;
@@ -195,43 +198,78 @@ export default function LobbyPage() {
     ({ tierId }) => filter === 'all' || tierId === filter,
   );
 
+  // The hero's gold CTA jumps straight into the $1 daily entry flow; before the
+  // pool has loaded it just scrolls the player down to the cards.
+  const dailyIndex = TOURNAMENT_TIER_IDS.indexOf('1usd_daily');
+  const scrollToTournaments = () =>
+    tournamentsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const handlePlayNow = () => {
+    const tournament = tournaments[dailyIndex];
+    if (tournament) setEntryTarget({ tierId: '1usd_daily', tournament });
+    else scrollToTournaments();
+  };
+
   return (
     <main className="bg-grid">
       <NetworkGuard>
         {/* Hero — the game's title screen */}
         <section className="relative overflow-hidden">
           <HeroBackdrop />
+          {/* Garden horizon — a low hedge grounding the title screen */}
+          <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-36 overflow-hidden">
+            <Bush variant="back" size={240} className="absolute -bottom-6 -left-12 opacity-50" />
+            <Bush variant="front" size={180} className="absolute -bottom-4 left-16 opacity-70" />
+            <Bush variant="back" size={280} className="absolute -bottom-8 -right-16 opacity-50" />
+            <Bush variant="front" size={200} className="absolute -bottom-4 right-14 opacity-70" />
+          </div>
+
           <motion.div
             style={{ opacity: heroOpacity, y: heroY }}
-            className="relative mx-auto flex min-h-[40vh] w-full max-w-[840px] flex-col items-center justify-center gap-5 px-4 py-14 text-center sm:min-h-[50vh] sm:gap-7 sm:py-20"
+            className="relative mx-auto flex min-h-[64vh] w-full max-w-[840px] flex-col items-center justify-center gap-5 px-4 py-12 text-center sm:min-h-[70vh] sm:gap-6 sm:py-16"
           >
+            <Mascot
+              pose="hero"
+              title="SnakeArena mascot chasing a strawberry"
+              className="animate-float h-auto w-[230px] max-w-full drop-shadow-[0_18px_40px_rgba(3,18,15,0.6)] sm:w-[360px]"
+            />
+
             <div>
-              <h1 className="text-glow-hero max-w-full text-[40px] font-extrabold leading-[1.05] tracking-tight sm:text-[64px]">
+              <h1 className="text-glow-hero font-display max-w-full text-[38px] font-bold leading-[1.04] tracking-tight sm:text-[60px]">
                 Play Snake.
                 <br className="sm:hidden" /> Win USDC.
               </h1>
-              <p className="mt-3 text-sm text-secondary sm:mt-4 sm:text-base">
-                Pay to enter. Top 3 split the pot.{' '}
-                <span className="font-medium text-white">Live on Base.</span>
+              <p className="mt-3 text-sm text-secondary sm:text-base">
+                Pay to enter · Top 3 split the pot ·{' '}
+                <span className="font-medium text-white">Live on Base</span>
               </p>
             </div>
+
+            <motion.button
+              whileTap={{ scale: 0.96 }}
+              transition={springFast}
+              onClick={handlePlayNow}
+              className="btn-sheen font-display flex min-h-[3.25rem] items-center gap-2.5 rounded-full py-1 pl-1.5 pr-6 text-lg font-bold text-coin-text shadow-glow transition-shadow hover:shadow-[0_0_36px_rgba(239,159,39,0.55)]"
+            >
+              <span className="flex h-10 w-10 items-center justify-center rounded-full bg-coin-light text-coin-text shadow-[inset_0_1px_0_rgba(255,255,255,0.5)]">
+                <Play size={18} fill="currentColor" aria-hidden />
+              </span>
+              Play now · $1
+            </motion.button>
 
             <StatsBanner totalPlayers={totalPlayers} totalPool={totalPool} />
 
             <button
-              onClick={() =>
-                tournamentsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-              }
-              className="group flex min-h-10 items-center gap-2 rounded-full px-4 text-[13px] font-semibold text-secondary transition-colors hover:text-accent"
+              onClick={scrollToTournaments}
+              className="group flex min-h-9 items-center gap-1.5 text-[13px] font-medium text-muted transition-colors hover:text-accent"
             >
+              Browse all tournaments
               <motion.span
                 aria-hidden
-                animate={{ y: [0, 4, 0] }}
+                animate={{ y: [0, 3, 0] }}
                 transition={{ repeat: Infinity, duration: 1.8, ease: 'easeInOut' }}
               >
                 ↓
               </motion.span>
-              View Tournaments
             </button>
           </motion.div>
         </section>
@@ -252,7 +290,7 @@ export default function LobbyPage() {
           {/* Tournaments */}
           <section ref={tournamentsRef} className="scroll-mt-20">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <h2 className="text-xl font-bold tracking-tight sm:text-2xl">Tournaments</h2>
+              <h2 className="font-display text-xl font-bold tracking-tight sm:text-2xl">Tournaments</h2>
               <div
                 role="tablist"
                 aria-label="Filter tournaments"
@@ -274,7 +312,7 @@ export default function LobbyPage() {
                       <motion.span
                         layoutId="tier-filter-pill"
                         transition={{ type: 'spring', stiffness: 420, damping: 34 }}
-                        className="absolute -inset-px rounded-full bg-accent shadow-[inset_0_1px_0_rgba(255,255,255,0.3),0_0_14px_rgba(45,212,191,0.4)]"
+                        className="absolute -inset-px rounded-full bg-accent shadow-[inset_0_1px_0_rgba(255,255,255,0.3),0_0_14px_rgba(93,202,165,0.45)]"
                       />
                     )}
                     <span className="relative">{item.label}</span>

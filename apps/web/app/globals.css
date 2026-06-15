@@ -3,7 +3,7 @@
 @tailwind utilities;
 
 body {
-  background-color: #07090d;
+  background-color: #04241f;
 }
 
 /* Mobile chrome: no grey flash on tap, UI text isn't selectable like prose. */
@@ -16,21 +16,29 @@ a {
   -webkit-user-select: none;
 }
 
-/* Focus: kill default browser rings; keyboard users get a teal ring instead. */
+/* Everything clickable gets the pointer cursor. */
+button:not(:disabled),
+a,
+[role='button']:not([aria-disabled='true']),
+[role='tab'] {
+  cursor: pointer;
+}
+
+/* Focus: kill default browser rings; keyboard users get a mint ring instead. */
 * {
   outline: none;
 }
 *:focus-visible {
-  outline: 2px solid #2dd4bf;
+  outline: 2px solid #9fe1cb;
   outline-offset: 2px;
 }
 
 ::selection {
-  background-color: #2dd4bf;
-  color: #07090d;
+  background-color: #9fe1cb;
+  color: #04241f;
 }
 
-/* Custom scrollbar: thin, dark, teal on hover. */
+/* Custom scrollbar: thin, garden green track, mint thumb on hover. */
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
@@ -40,80 +48,88 @@ a {
 }
 ::-webkit-scrollbar-thumb {
   border-radius: 8px;
-  border: 3px solid #07090d;
-  background-color: #1f2933;
+  border: 3px solid #04241f;
+  background-color: #0f6e56;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(45, 212, 191, 0.55);
+  background-color: rgba(159, 225, 203, 0.7);
 }
 @supports not selector(::-webkit-scrollbar) {
   * {
     scrollbar-width: thin;
-    scrollbar-color: #1f2933 transparent;
+    scrollbar-color: #0f6e56 transparent;
   }
 }
 
-/* Subtle Linear-style grid for the lobby backdrop. */
+/* Subtle grid for the lobby backdrop — faint mint lines. */
 .bg-grid {
   background-image:
-    linear-gradient(to right, rgba(255, 255, 255, 0.022) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.022) 1px, transparent 1px);
+    linear-gradient(to right, rgba(159, 225, 203, 0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(159, 225, 203, 0.03) 1px, transparent 1px);
   background-size: 32px 32px;
   mask-image: linear-gradient(to bottom, black 0%, black 55%, transparent 100%);
 }
 
-/* Teal gradient applied to text (prize pools, hero numbers). */
+/* Mint gradient applied to text (prize pools, hero numbers). */
 .text-gradient-teal {
-  background-image: linear-gradient(180deg, #2dd4bf 0%, #14b8a6 100%);
+  background-image: linear-gradient(180deg, #9fe1cb 0%, #5dcaa5 100%);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
 }
 
-/* Crypto-terminal glow under prize amounts. */
-.text-glow-prize {
-  text-shadow: 0 0 24px rgba(45, 212, 191, 0.4);
+/* Gold gradient text — big scores on the game-over card. */
+.text-gradient-coin {
+  background-image: linear-gradient(180deg, #fac775 0%, #ef9f27 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 
-/* Title-screen glow for the hero headline. */
+/* Soft mint glow under prize amounts. */
+.text-glow-prize {
+  text-shadow: 0 0 24px rgba(93, 202, 165, 0.4);
+}
+
+/* Title-screen glow for the hero headline — mint with a warm gold undertone. */
 .text-glow-hero {
   text-shadow:
-    0 0 28px rgba(45, 212, 191, 0.35),
-    0 0 90px rgba(45, 212, 191, 0.14);
+    0 0 28px rgba(93, 202, 165, 0.32),
+    0 0 90px rgba(239, 159, 39, 0.12);
 }
 
-/* Hero gradient for filled elements (primary CTAs). */
+/* Gold fill for primary CTAs. */
 .bg-gradient-hero {
-  background-image: linear-gradient(135deg, #2dd4bf 0%, #06b6d4 100%);
+  background-image: linear-gradient(135deg, #fac775 0%, #ef9f27 100%);
 }
 
-/* Primary CTA: hero gradient with a lighter top edge, like a lit key cap. */
+/* Primary CTA: gold fill with a lit top edge, like a coin catching light. */
 .btn-sheen {
   background-image:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.22) 0%, rgba(255, 255, 255, 0) 38%),
-    linear-gradient(135deg, #2dd4bf 0%, #06b6d4 100%);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.32) 0%, rgba(255, 255, 255, 0) 42%),
+    linear-gradient(135deg, #fac775 0%, #ef9f27 100%);
 }
 
 /* Soft gold wash for leader chips and win rows. */
 .bg-gradient-gold {
-  background-image: linear-gradient(135deg, rgba(251, 191, 36, 0.14) 0%, rgba(217, 119, 6, 0.04) 100%);
+  background-image: linear-gradient(135deg, rgba(239, 159, 39, 0.16) 0%, rgba(217, 119, 6, 0.05) 100%);
 }
 
 /* Glassmorphism surface for hero tiles and the wallet pill. */
 .glass {
-  background-color: rgba(255, 255, 255, 0.05);
+  background-color: rgba(159, 225, 203, 0.06);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
 }
 
-/* Radial teal wash that fades in on card hover (paired with group-hover). */
+/* Radial mint wash that fades in on card hover (paired with group-hover). */
 .card-hover-glow {
-  background-image: radial-gradient(circle at top right, rgba(45, 212, 191, 0.08) 0%, transparent 50%);
+  background-image: radial-gradient(circle at top right, rgba(29, 158, 117, 0.14) 0%, transparent 50%);
 }
 
 /* Game page: dark radial pool of light behind the board. */
 .bg-game-glow {
-  background-image: radial-gradient(ellipse 80% 60% at 50% 28%, #1a1f2e 0%, #07090d 100%);
+  background-image: radial-gradient(ellipse 80% 60% at 50% 28%, #06302a 0%, #04241f 100%);
 }
 
 /* Live dots that actually breathe (scale, not just opacity). */
@@ -130,6 +146,63 @@ a {
 }
 .animate-live-dot {
   animation: live-pulse 1.7s ease-in-out infinite;
+}
+
+/* Mascot idle: a gentle vertical float. */
+@keyframes float-idle {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+.animate-float {
+  animation: float-idle 4s ease-in-out infinite;
+}
+
+/* Brief horizontal shake — death feedback on the board. */
+@keyframes board-shake {
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  20% {
+    transform: translate(-3px, 1px);
+  }
+  40% {
+    transform: translate(3px, -1px);
+  }
+  60% {
+    transform: translate(-2px, 1px);
+  }
+  80% {
+    transform: translate(2px, 0);
+  }
+}
+.animate-shake {
+  animation: board-shake 0.15s ease-in-out;
+}
+
+/* Pending-tx shimmer for power-up buttons mid-purchase. */
+@keyframes pending-sheen {
+  0% {
+    background-position: -160% 0;
+  }
+  100% {
+    background-position: 160% 0;
+  }
+}
+.animate-pending {
+  background-image: linear-gradient(
+    100deg,
+    transparent 35%,
+    rgba(250, 199, 117, 0.22) 50%,
+    transparent 65%
+  );
+  background-size: 200% 100%;
+  animation: pending-sheen 1.1s linear infinite;
 }
 
 /* Hero backdrop orbs drift slowly — barely perceptible, never distracting. */
@@ -152,22 +225,42 @@ a {
   animation: orb-drift 19s ease-in-out infinite reverse;
 }
 
+/* Snake-path loader stroke — draws and retreats on a loop. */
+@keyframes garden-loader {
+  0% {
+    stroke-dashoffset: 64;
+  }
+  50% {
+    stroke-dashoffset: 0;
+  }
+  100% {
+    stroke-dashoffset: -64;
+  }
+}
+.animate-garden-loader {
+  animation: garden-loader 1.4s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-orb,
   .animate-orb-slow,
-  .animate-live-dot {
+  .animate-live-dot,
+  .animate-float,
+  .animate-shake,
+  .animate-pending,
+  .animate-garden-loader {
     animation: none;
   }
 }
 
-/* Shimmer skeletons for loading states. */
+/* Shimmer skeletons for loading states — garden green. */
 .skeleton {
   border-radius: 8px;
-  background-color: #161c24;
+  background-color: #085041;
   background-image: linear-gradient(
     100deg,
     transparent 30%,
-    rgba(255, 255, 255, 0.05) 50%,
+    rgba(159, 225, 203, 0.08) 50%,
     transparent 70%
   );
   background-size: 200% 100%;

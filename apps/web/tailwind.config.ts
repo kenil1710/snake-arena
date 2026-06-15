@@ -7,18 +7,43 @@ const config: Config = {
     extend: {
       colors: {
         background: colors.background,
+        board: colors.boardBg,
         surface: {
           DEFAULT: colors.surface,
-          elevated: colors.surfaceElevated,
-          deep: colors.surface3,
+          elevated: colors.surfaceRaised,
+          raised: colors.surfaceRaised,
+          deep: colors.boardBg,
         },
-        edge: colors.borderSubtle,
+        edge: {
+          DEFAULT: colors.border,
+          bright: colors.borderBright,
+        },
         muted: colors.textMuted,
         secondary: colors.textSecondary,
         accent: {
-          DEFAULT: colors.teal,
-          hover: colors.tealDeep,
-          soft: colors.tealSoft,
+          DEFAULT: colors.accent,
+          hover: colors.accentBright,
+          soft: colors.accentBright,
+          bright: colors.accentBright,
+        },
+        coin: {
+          DEFAULT: colors.coin,
+          light: colors.coinLight,
+          text: colors.coinText,
+        },
+        snake: {
+          DEFAULT: colors.snake,
+          spot: colors.snakeSpot,
+          head: colors.snakeHead,
+        },
+        leaf: {
+          DEFAULT: colors.leaf,
+          dark: colors.leafDark,
+        },
+        berry: {
+          DEFAULT: colors.berry,
+          leaf: colors.berryLeaf,
+          seed: colors.berrySeed,
         },
         cyan: colors.cyan,
         gold: {
@@ -33,7 +58,7 @@ const config: Config = {
       },
       borderColor: {
         // Plain `border` class gets the design-system hairline by default.
-        DEFAULT: colors.borderSubtle,
+        DEFAULT: colors.border,
       },
       borderRadius: {
         card: radii.card,
@@ -48,6 +73,7 @@ const config: Config = {
       },
       fontFamily: {
         sans: ['var(--font-inter)', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        display: ['var(--font-baloo)', 'var(--font-inter)', 'ui-sans-serif', 'system-ui', 'sans-serif'],
         mono: ['var(--font-jetbrains)', 'ui-monospace', 'SFMono-Regular', 'monospace'],
       },
     },

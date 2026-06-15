@@ -15,45 +15,42 @@ function AnimatedNumber({ value, format }: { value: number; format: (n: number) 
 }
 
 const formatDollars = (n: number) =>
-  n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2, minimumFractionDigits: 2 });
+  n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
 
 interface StatsBannerProps {
   totalPlayers: number | undefined;
   totalPool: bigint | undefined;
 }
 
-/** The hero's two stat tiles — glassmorphism over the animated backdrop. */
+/** Two compact stat chips under the hero CTA — live players + total prizes. */
 export function StatsBanner({ totalPlayers, totalPool }: StatsBannerProps) {
   return (
-    <section className="grid w-full max-w-md grid-cols-2 gap-3">
-      <div className="glass rounded-card border border-white/10 p-4 text-left sm:p-5">
-        <p className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted">
-          <span className="animate-live-dot inline-flex h-2 w-2 rounded-full bg-live" aria-hidden />
-          Live now
-        </p>
+    <div className="flex flex-wrap items-center justify-center gap-2.5">
+      <div className="flex items-center gap-2 rounded-full border bg-surface/80 px-3.5 py-2 backdrop-blur">
+        <span className="animate-live-dot inline-flex h-2 w-2 rounded-full bg-live" aria-hidden />
         {totalPlayers === undefined ? (
-          <div className="skeleton mt-3 h-9 w-16" />
+          <span className="skeleton h-4 w-6" />
         ) : (
-          <p className="mt-2 font-mono text-3xl font-semibold tabular-nums leading-tight sm:text-4xl">
+          <span className="font-mono text-sm font-semibold tabular-nums text-white">
             <AnimatedNumber value={totalPlayers} format={(n) => String(Math.round(n))} />
-          </p>
+          </span>
         )}
-        <p className="mt-0.5 text-[13px] text-muted">players</p>
+        <span className="text-[13px] text-muted">playing</span>
       </div>
 
-      <div className="glass rounded-card border border-white/10 p-4 text-left sm:p-5">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted">
-          Total prizes
-        </p>
+      <div className="flex items-center gap-2 rounded-full border bg-surface/80 px-3.5 py-2 backdrop-blur">
+        <span className="flex h-4 w-4 items-center justify-center rounded-full bg-coin text-[9px] font-bold text-coin-text" aria-hidden>
+          $
+        </span>
         {totalPool === undefined ? (
-          <div className="skeleton mt-3 h-9 w-28" />
+          <span className="skeleton h-4 w-12" />
         ) : (
-          <p className="text-gradient-teal text-glow-prize mt-2 font-mono text-3xl font-bold tabular-nums leading-tight sm:text-4xl">
+          <span className="font-mono text-sm font-semibold tabular-nums text-coin-light">
             <AnimatedNumber value={Number(formatUnits(totalPool, 6))} format={formatDollars} />
-          </p>
+          </span>
         )}
-        <p className="mt-0.5 text-[13px] text-muted">across live pools</p>
+        <span className="text-[13px] text-muted">in prizes</span>
       </div>
-    </section>
+    </div>
   );
 }
