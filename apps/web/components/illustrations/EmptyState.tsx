@@ -11,9 +11,9 @@ function CoiledSnake({ size }: { size: number }) {
     <svg width={size} height={size} viewBox="0 0 64 64" fill="none" aria-hidden>
       <defs>
         <linearGradient id={gid} x1="16" y1="16" x2="48" y2="48" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#99f6e4" />
-          <stop offset="60%" stopColor="#2dd4bf" />
-          <stop offset="100%" stopColor="#0d9488" />
+          <stop offset="0%" stopColor="#d4eda9" />
+          <stop offset="60%" stopColor="#C0DD97" />
+          <stop offset="100%" stopColor="#97C459" />
         </linearGradient>
       </defs>
       {/* Spiral coil, head surfacing at the outer end. */}
@@ -24,8 +24,8 @@ function CoiledSnake({ size }: { size: number }) {
         strokeLinecap="round"
         opacity="0.9"
       />
-      <circle cx="39" cy="20.2" r="1" fill="#07090d" />
-      <path d="M42.5 18.5l2-1.6m-2 1.6 2.4.6" stroke="#f87171" strokeWidth="1" strokeLinecap="round" />
+      <circle cx="39" cy="20.2" r="1" fill="#04241f" />
+      <path d="M42.5 18.5l2-1.6m-2 1.6 2.4.6" stroke="#E24B4A" strokeWidth="1" strokeLinecap="round" />
     </svg>
   );
 }
@@ -49,7 +49,7 @@ function DisconnectedWire({ size }: { size: number }) {
       />
       <rect x="36" y="27" width="8" height="9" rx="2.5" transform="rotate(156 40 31.5)" stroke="#94a3b8" strokeWidth="2" fill="rgba(148,163,184,0.08)" />
       {/* Spark gap */}
-      <path d="M31 22.5l1.4-3M33.6 41.5l-1.4 3M27 19l-.6-2.6M37.6 45l.6 2.6" stroke="#ef4444" strokeWidth="1.6" strokeLinecap="round" opacity="0.8" />
+      <path d="M31 22.5l1.4-3M33.6 41.5l-1.4 3M27 19l-.6-2.6M37.6 45l.6 2.6" stroke="#E24B4A" strokeWidth="1.6" strokeLinecap="round" opacity="0.8" />
     </svg>
   );
 }
@@ -61,12 +61,12 @@ function WalletMark({ size }: { size: number }) {
     <svg width={size} height={size} viewBox="0 0 64 64" fill="none" aria-hidden>
       <defs>
         <linearGradient id={gid} x1="12" y1="22" x2="52" y2="48" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#2dd4bf" />
-          <stop offset="100%" stopColor="#06b6d4" />
+          <stop offset="0%" stopColor="#9FE1CB" />
+          <stop offset="100%" stopColor="#5DCAA5" />
         </linearGradient>
       </defs>
       <path d="M32 6v9m0 0-4-4m4 4 4-4" stroke="#94a3b8" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
-      <rect x="12" y="21" width="40" height="26" rx="6" stroke={`url(#${gid})`} strokeWidth="2.4" fill="rgba(45,212,191,0.07)" />
+      <rect x="12" y="21" width="40" height="26" rx="6" stroke={`url(#${gid})`} strokeWidth="2.4" fill="rgba(93,202,165,0.08)" />
       <path d="M12 29h28a4 4 0 0 1 4 4v2a4 4 0 0 1-4 4H12" stroke={`url(#${gid})`} strokeWidth="2" opacity="0.65" />
       <circle cx="42" cy="34" r="2" fill={`url(#${gid})`} />
     </svg>

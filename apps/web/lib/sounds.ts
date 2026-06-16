@@ -4,29 +4,39 @@
  */
 let ctx: AudioContext | null = null;
 
-function play(frequency: number, durationMs: number, type: OscillatorType, gain: number): void {
+function tone(
+  frequency: number,
+  durationMs: number,
+  type: OscillatorType,
+  gain: number,
+  whenOffset = 0,
+): void {
   try {
     ctx ??= new AudioContext();
     if (ctx.state === 'suspended') void ctx.resume();
 
+    const start = ctx.currentTime + whenOffset;
     const oscillator = ctx.createOscillator();
     const volume = ctx.createGain();
     oscillator.type = type;
-    oscillator.frequency.value = frequency;
-    volume.gain.setValueAtTime(gain, ctx.currentTime);
-    volume.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + durationMs / 1000);
+    oscillator.frequency.setValueAtTime(frequency, start);
+    volume.gain.setValueAtTime(gain, start);
+    volume.gain.exponentialRampToValueAtTime(0.0001, start + durationMs / 1000);
     oscillator.connect(volume).connect(ctx.destination);
-    oscillator.start();
-    oscillator.stop(ctx.currentTime + durationMs / 1000);
+    oscillator.start(start);
+    oscillator.stop(start + durationMs / 1000);
   } catch {
     // Audio unavailable — the game plays fine silent.
   }
 }
 
+/** Eating an apple: a short, bright pluck. */
 export function playAppleSound(): void {
-  play(880, 90, 'square', 0.04);
+  tone(1174.7, 80, 'triangle', 0.05); // ~D6
 }
 
+/** Death: a low, descending two-tone. */
 export function playDeathSound(): void {
-  play(140, 450, 'sawtooth', 0.06);
+  tone(220, 170, 'sawtooth', 0.06); // A3
+  tone(146.83, 300, 'sawtooth', 0.055, 0.13); // → D3
 }

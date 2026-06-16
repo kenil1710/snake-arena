@@ -20,8 +20,8 @@ import {
   EXPLORER_URL,
   SNAKE_ARENA_ADDRESS,
   TIER_ENUM_INDEX,
+  TIER_META,
   TOURNAMENT_TIER_IDS,
-  TOURNAMENT_TIERS,
   type ActiveTournament,
   type PlayerEntry,
 } from '@/lib/contracts';
@@ -37,6 +37,7 @@ import {
 } from '@/lib/events';
 import { formatUsdc, timeAgo, truncateAddress } from '@/lib/format';
 import { EmptyState } from '@/components/illustrations/EmptyState';
+import { Mascot } from '@/components/illustrations/Mascot';
 import { TierIcon } from '@/components/illustrations/TierIcon';
 import { IdentityAvatar } from '@/components/ui/IdentityAvatar';
 
@@ -116,8 +117,8 @@ export default function ProfilePage() {
     enabled: Boolean(address) && Boolean(client),
     refetchInterval: 15_000,
     queryFn: async () => {
-      const common = { client: client!, args: { player: address } } as const;
-      const [entered, scores] = await Promise.all([
+      const common = { args: { player: address } } as const;
+      const [enteredScan, scoresScan] = await Promise.all([
         cachedLogScan<EnteredArgs>({
           ...common,
           event: ENTERED_TOURNAMENT_EVENT,
@@ -129,12 +130,16 @@ export default function ProfilePage() {
           cacheKey: `scores:${address!.toLowerCase()}`,
         }),
       ]);
+      const entered = enteredScan.logs;
+      const scores = scoresScan.logs;
+      // Either scan hitting a chunk failure means the feed is incomplete.
+      const partial = !enteredScan.complete || !scoresScan.complete;
       const recentBlocks = [...entered, ...scores]
         .sort((a, b) => Number(b.blockNumber - a.blockNumber))
         .slice(0, TIMESTAMPED_ITEMS)
         .map((log) => log.blockNumber);
       const timestamps = await blockTimestamps(client!, recentBlocks);
-      return { entered, scores, timestamps };
+      return { entered, scores, timestamps, partial };
     },
   });
 
@@ -170,7 +175,7 @@ export default function ProfilePage() {
     if (tournamentId === undefined) return 'Tournament';
     const info = tournamentInfo.get(tournamentId);
     const tierId = info ? TOURNAMENT_TIER_IDS[info.tier] : undefined;
-    return tierId ? TOURNAMENT_TIERS[tierId].label : `Tournament #${tournamentId.toString()}`;
+    return tierId ? TIER_META[tierId].displayName : `Tournament #${tournamentId.toString()}`;
   };
 
   // Winnings: every TournamentFinalized payout addressed to this wallet.
@@ -179,8 +184,7 @@ export default function ProfilePage() {
     enabled: Boolean(address) && Boolean(client),
     refetchInterval: 30_000,
     queryFn: async () => {
-      const logs = await cachedLogScan<FinalizedArgs>({
-        client: client!,
+      const { logs } = await cachedLogScan<FinalizedArgs>({
         event: TOURNAMENT_FINALIZED_EVENT,
         cacheKey: 'tournament-finalized',
       });
@@ -324,7 +328,7 @@ export default function ProfilePage() {
 
   const ACTIVITY_ICON: Record<'entry' | 'score' | 'win', { Icon: typeof LogIn; classes: string }> = {
     entry: { Icon: LogIn, classes: 'border-live/30 bg-live/10 text-live' },
-    score: { Icon: Gamepad2, classes: 'border-sky-500/30 bg-sky-500/10 text-sky-400' },
+    score: { Icon: Gamepad2, classes: 'border-accent/30 bg-accent/10 text-accent' },
     win: { Icon: Trophy, classes: 'border-gold/30 bg-gold/10 text-gold' },
   };
 
@@ -343,13 +347,13 @@ export default function ProfilePage() {
   }
 
   return (
-    <main className="mx-auto w-full max-w-3xl px-4 py-6 pb-[max(env(safe-area-inset-bottom),1.5rem)] sm:py-8">
+    <main className="mx-auto w-full max-w-3xl px-4 py-6 pb-[max(env(safe-area-inset-bottom),6.5rem)] sm:py-8 md:pb-12">
       {/* Identity header */}
       <section className="flex items-center gap-4">
         <IdentityAvatar seed={address} size={64} className="shrink-0 ring-2 ring-accent/25" />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
-            <h1 className="max-w-full truncate text-2xl font-bold tracking-tight">
+            <h1 className="font-display max-w-full truncate text-2xl font-bold tracking-tight">
               {username ?? truncateAddress(address)}
             </h1>
             <span className="flex items-center gap-1.5 rounded-full border border-accent/20 bg-accent/[0.06] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-accent">
@@ -376,34 +380,34 @@ export default function ProfilePage() {
         <StatBlock
           label="Total winnings"
           icon={<Trophy size={15} className="text-gold/80" aria-hidden />}
-          tint="radial-gradient(circle at top right, rgba(251,191,36,0.10) 0%, transparent 60%)"
+          tint="radial-gradient(circle at top right, rgba(239,159,39,0.12) 0%, transparent 60%)"
           loading={wins.isLoading}
           value={
             totalWinnings === undefined ? (
               '—'
             ) : (
-              <span className="text-gradient-teal text-glow-prize">{formatUsdc(totalWinnings)}</span>
+              <span className="text-gradient-coin text-glow-prize">{formatUsdc(totalWinnings)}</span>
             )
           }
         />
         <StatBlock
           label="Total entries"
           icon={<Ticket size={15} className="text-accent/80" aria-hidden />}
-          tint="radial-gradient(circle at top right, rgba(45,212,191,0.10) 0%, transparent 60%)"
+          tint="radial-gradient(circle at top right, rgba(93,202,165,0.12) 0%, transparent 60%)"
           loading={history.isLoading}
           value={totalEntries ?? '—'}
         />
         <StatBlock
           label="Entry spend"
           icon={<Coins size={15} className="text-danger/70" aria-hidden />}
-          tint="radial-gradient(circle at top right, rgba(239,68,68,0.09) 0%, transparent 60%)"
+          tint="radial-gradient(circle at top right, rgba(226,75,74,0.12) 0%, transparent 60%)"
           loading={history.isLoading || (distinctIds.length > 0 && tournamentReads.isLoading)}
           value={totalSpent === undefined ? '—' : formatUsdc(totalSpent)}
         />
         <StatBlock
           label="Best score"
-          icon={<Target size={15} className="text-cyan/80" aria-hidden />}
-          tint="radial-gradient(circle at top right, rgba(6,182,212,0.10) 0%, transparent 60%)"
+          icon={<Target size={15} className="text-accent-bright/80" aria-hidden />}
+          tint="radial-gradient(circle at top right, rgba(159,225,203,0.12) 0%, transparent 60%)"
           loading={history.isLoading}
           value={bestScore === undefined ? '—' : bestScore.toString()}
         />
@@ -433,7 +437,9 @@ export default function ProfilePage() {
           >
             <TierIcon tierId={tierId} size={28} className="shrink-0" />
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium">{TOURNAMENT_TIERS[tierId].label}</p>
+              <p className="font-display truncate text-sm font-semibold">
+                {TIER_META[tierId].displayName}
+              </p>
               <p className="text-xs tabular-nums text-muted">
                 {rank !== null ? `of ${playerCount} players` : 'no score yet'}
               </p>
@@ -449,7 +455,7 @@ export default function ProfilePage() {
             )}
             <Link
               href={`/play/${tournament.id.toString()}`}
-              className="btn-sheen flex h-9 shrink-0 items-center gap-1.5 rounded-btn px-3 text-xs font-bold text-background transition-shadow hover:shadow-glow"
+              className="btn-sheen font-display flex h-9 shrink-0 items-center gap-1.5 rounded-full px-3.5 text-xs font-bold text-coin-text transition-shadow hover:shadow-glow"
             >
               <Play size={12} fill="currentColor" aria-hidden /> Play
             </Link>
@@ -471,15 +477,13 @@ export default function ProfilePage() {
           </div>
         )}
         {wins.isSuccess && wins.data.length === 0 && (
-          <EmptyState
-            illustration="snake"
-            body={
-              <>
-                No wins yet — your first one could be next 🐍 Top 3 pays out automatically when a
-                tournament closes.
-              </>
-            }
-          />
+          <div className="flex flex-col items-center gap-2 px-4 py-8 text-center">
+            <Mascot pose="happy" size={72} />
+            <p className="max-w-xs text-sm text-muted">
+              No wins yet — your first one could be next 🐍 Top 3 pays out automatically when a
+              tournament closes.
+            </p>
+          </div>
         )}
         {wins.isSuccess && wins.data.length > 0 && (
           <div className="relative px-4 py-2">
@@ -521,6 +525,11 @@ export default function ProfilePage() {
       </SectionCard>
 
       <SectionCard title="Recent activity">
+        {history.data?.partial && (
+          <p className="border-b border-edge bg-coin/[0.06] px-4 py-2.5 text-xs text-coin">
+            Some recent activity may be missing — refresh to retry.
+          </p>
+        )}
         {history.isLoading && (
           <div className="space-y-2.5 p-4">
             {[0, 1, 2].map((index) => (

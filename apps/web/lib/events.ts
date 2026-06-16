@@ -1,5 +1,5 @@
-import { parseAbiItem, type AbiEvent, type Address, type Hex } from 'viem';
-import { DEPLOY_BLOCK, SNAKE_ARENA_ADDRESS } from './contracts';
+import { createPublicClient, http, parseAbiItem, type AbiEvent, type Address, type Hex } from 'viem';
+import { DEPLOY_BLOCK, LOGS_RPC_URL, SNAKE_ARENA_ADDRESS } from './contracts';
 
 export const ENTERED_TOURNAMENT_EVENT = parseAbiItem(
   'event EnteredTournament(uint256 indexed tournamentId, address indexed player, uint256 entryNumber)',
@@ -55,13 +55,35 @@ export interface ScanClient {
   }): Promise<{ args: unknown; blockNumber: bigint; transactionHash: Hex; logIndex: number }[]>;
 }
 
-/** Base Sepolia's public RPC caps eth_getLogs at 10k blocks — stay under it. */
-const CHUNK_SIZE = 9_000n;
-/** Backfill a few chunks at a time: fast without hammering the public RPC. */
-const PARALLEL_CHUNKS = 4;
+/**
+ * eth_getLogs block-range cap. The public Base Sepolia RPC allows a 2000-block
+ * range per call; we stay one block under it. (Provider free tiers like Alchemy
+ * cap this far lower — 10 blocks — which is why scans run against LOGS_RPC_URL,
+ * the range-permissive endpoint, rather than the app's main client.)
+ */
+const CHUNK_SIZE = 2_000n;
+/** One retry after a short pause smooths over a rate-limited RPC's blips. */
+const CHUNK_RETRY_DELAY_MS = 1_000;
 /** Drop caches this old and rescan from scratch (guards against bad writes). */
 const CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
-const CACHE_VERSION = 2;
+const CACHE_VERSION = 3;
+
+/**
+ * Dedicated client for historical getLogs, pinned to a range-permissive RPC so
+ * wide backfills work even when the app's main RPC is a provider key that caps
+ * eth_getLogs to a tiny block range. Wallet/contract reads keep using the main
+ * (wagmi) client; only these scans use LOGS_RPC_URL.
+ */
+const scanClient = createPublicClient({ transport: http(LOGS_RPC_URL) });
+
+/** Pull a human-readable reason out of a viem/RPC error for logging. */
+function rpcErrorMessage(error: unknown): string {
+  if (error && typeof error === 'object') {
+    const e = error as { details?: string; shortMessage?: string; message?: string };
+    return e.details || e.shortMessage || e.message || String(error);
+  }
+  return String(error);
+}
 
 interface CacheShape<TArgs> {
   version: number;
@@ -99,13 +121,21 @@ function loadCache<TArgs>(cacheKey: string): CacheShape<TArgs> | null {
   }
 }
 
+/** Outcome of scanning a block range: the logs plus how far we got cleanly. */
+interface RangeScan<TArgs> {
+  logs: ScannedLog<TArgs>[];
+  /** Highest block reached by an unbroken run of successful chunks. */
+  scannedThrough: bigint;
+  /** True only when every chunk in [fromBlock, toBlock] succeeded. */
+  complete: boolean;
+}
+
 async function fetchRange<TArgs>(
-  client: ScanClient,
   event: AbiEvent,
   args: Record<string, unknown> | undefined,
   fromBlock: bigint,
   toBlock: bigint,
-): Promise<ScannedLog<TArgs>[]> {
+): Promise<RangeScan<TArgs>> {
   const common = { address: SNAKE_ARENA_ADDRESS, event, args, strict: true } as const;
 
   const ranges: { fromBlock: bigint; toBlock: bigint }[] = [];
@@ -114,50 +144,105 @@ async function fetchRange<TArgs>(
     ranges.push({ fromBlock: start, toBlock: end });
   }
 
-  const chunks: Awaited<ReturnType<ScanClient['getLogs']>>[] = [];
-  for (let i = 0; i < ranges.length; i += PARALLEL_CHUNKS) {
-    const batch = ranges.slice(i, i + PARALLEL_CHUNKS);
-    chunks.push(...(await Promise.all(batch.map((range) => client.getLogs({ ...common, ...range })))));
+  // One chunk with a single retry; null means "gave up on this window" so the
+  // overall scan is reported incomplete (rather than throwing the whole thing).
+  const fetchChunk = async (range: { fromBlock: bigint; toBlock: bigint }) => {
+    try {
+      return await scanClient.getLogs({ ...common, ...range });
+    } catch (error) {
+      console.warn('[events.ts] getLogs failed, retrying:', rpcErrorMessage(error), {
+        fromBlock: range.fromBlock,
+        toBlock: range.toBlock,
+        address: SNAKE_ARENA_ADDRESS,
+      });
+      await new Promise((resolve) => setTimeout(resolve, CHUNK_RETRY_DELAY_MS));
+      try {
+        return await scanClient.getLogs({ ...common, ...range });
+      } catch (retryError) {
+        console.warn('[events.ts] getLogs failed after retry:', rpcErrorMessage(retryError), {
+          fromBlock: range.fromBlock,
+          toBlock: range.toBlock,
+          address: SNAKE_ARENA_ADDRESS,
+        });
+        return null;
+      }
+    }
+  };
+
+  // Sequential (range-limited RPCs reject parallel bursts). A skipped chunk
+  // marks the scan incomplete but never discards the other chunks' data.
+  const out: ScannedLog<TArgs>[] = [];
+  let scannedThrough = fromBlock - 1n;
+  let complete = true;
+
+  for (const range of ranges) {
+    const logs = await fetchChunk(range);
+    if (logs === null) {
+      complete = false;
+      continue; // keep going so partial data still renders
+    }
+    for (const log of logs) {
+      // Historical ranges only return mined logs, but viem's type still allows
+      // the pending shape (null block/tx/index) — guard before trusting them.
+      if (log.blockNumber === null || log.transactionHash === null || log.logIndex === null) {
+        continue;
+      }
+      out.push({
+        args: (log as { args: unknown }).args as TArgs,
+        blockNumber: log.blockNumber,
+        transactionHash: log.transactionHash,
+        logIndex: log.logIndex,
+      });
+    }
+    // Advance the "clean" watermark only while no earlier chunk has failed.
+    if (complete) scannedThrough = range.toBlock;
   }
 
-  return chunks.flat().map((log) => ({
-    args: log.args as TArgs,
-    blockNumber: log.blockNumber,
-    transactionHash: log.transactionHash,
-    logIndex: log.logIndex,
-  }));
+  // Concatenated chunks, sorted oldest-first so the merged cache stays ordered.
+  out.sort((a, b) => Number(a.blockNumber - b.blockNumber));
+  return { logs: out, scannedThrough, complete };
 }
 
 /**
  * Incremental, localStorage-cached log scan: the first call backfills from
  * DEPLOY_BLOCK; later calls only fetch blocks mined since the previous scan.
+ * Returns `complete: false` when some chunks failed — the caller can surface a
+ * "data may be missing" hint, and a refresh resumes from the last clean block.
  */
 export async function cachedLogScan<TArgs>(params: {
-  client: ScanClient;
   event: AbiEvent;
   cacheKey: string;
   args?: Record<string, unknown>;
-}): Promise<ScannedLog<TArgs>[]> {
-  const { client, event, args } = params;
+}): Promise<{ logs: ScannedLog<TArgs>[]; complete: boolean }> {
+  const { event, args } = params;
   const cacheKey = `snakearena:logs:v${CACHE_VERSION}:${params.cacheKey}`;
 
   const cached = loadCache<TArgs>(cacheKey);
-  const latest = await client.getBlockNumber();
+  const latest = await scanClient.getBlockNumber();
   const fromBlock = cached ? cached.scannedTo + 1n : DEPLOY_BLOCK;
+  const cachedLogs = cached?.logs ?? [];
 
-  let logs = cached?.logs ?? [];
-  if (fromBlock <= latest) {
-    logs = [...logs, ...(await fetchRange<TArgs>(client, event, args, fromBlock, latest))];
-  }
+  if (fromBlock > latest) return { logs: cachedLogs, complete: true };
 
+  const scan = await fetchRange<TArgs>(event, args, fromBlock, latest);
+
+  // Persist only the contiguous, fully-scanned prefix so any gap is retried on
+  // the next pass; still return everything fetched (incl. post-gap chunks) so
+  // the UI shows as much as it can right now.
+  const cacheable = scan.logs.filter((log) => log.blockNumber <= scan.scannedThrough);
   try {
-    const cache: CacheShape<TArgs> = { version: CACHE_VERSION, savedAt: Date.now(), scannedTo: latest, logs };
+    const cache: CacheShape<TArgs> = {
+      version: CACHE_VERSION,
+      savedAt: Date.now(),
+      scannedTo: scan.scannedThrough,
+      logs: [...cachedLogs, ...cacheable],
+    };
     localStorage.setItem(cacheKey, serialize(cache));
   } catch {
     // Quota exceeded or storage unavailable — scans just stay non-incremental.
   }
 
-  return logs;
+  return { logs: [...cachedLogs, ...scan.logs], complete: scan.complete };
 }
 
 const TIMESTAMP_CACHE_KEY = 'snakearena:blocktimes:v1';

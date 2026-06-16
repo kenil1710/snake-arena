@@ -4,6 +4,7 @@ import '@coinbase/onchainkit/styles.css';
 import './globals.css';
 import { Providers } from './providers';
 import { Header } from '@/components/Header';
+import { BottomNav } from '@/components/BottomNav';
 import { Toaster } from '@/components/Toast';
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter' });
@@ -32,6 +33,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <Providers>
           <Header />
           {children}
+          <BottomNav />
           <Toaster />
         </Providers>
       </body>

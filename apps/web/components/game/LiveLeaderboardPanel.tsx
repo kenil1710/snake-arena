@@ -106,7 +106,7 @@ export function LiveLeaderboardPanel({ tournamentId, withInfo = false }: LiveLea
                 {/* Re-keying pulses the score when a better run lands. */}
                 <motion.span
                   key={row.bestScore.toString()}
-                  initial={{ scale: 1.2, color: '#2dd4bf' }}
+                  initial={{ scale: 1.2, color: '#9FE1CB' }}
                   animate={{ scale: 1, color: '#ffffff' }}
                   transition={{ duration: 0.45 }}
                   className="font-mono font-semibold tabular-nums"

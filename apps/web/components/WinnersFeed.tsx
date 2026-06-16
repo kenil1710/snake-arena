@@ -40,8 +40,7 @@ export function WinnersFeed() {
     enabled: Boolean(publicClient),
     refetchInterval: 60_000, // keeps the "x min ago" labels honest
     queryFn: async (): Promise<FeedItem[]> => {
-      const logs = await cachedLogScan<FinalizedArgs>({
-        client: publicClient!,
+      const { logs } = await cachedLogScan<FinalizedArgs>({
         event: TOURNAMENT_FINALIZED_EVENT,
         cacheKey: 'tournament-finalized',
       });
@@ -115,7 +114,7 @@ export function WinnersFeed() {
   const items = feed.data ?? [];
 
   return (
-    <section className="fixed inset-x-0 bottom-0 z-30 border-t border-edge bg-background/85 px-4 pb-[max(env(safe-area-inset-bottom),0.625rem)] pt-2.5 backdrop-blur-xl md:static md:z-auto md:border-0 md:bg-transparent md:p-0 md:backdrop-blur-none">
+    <section className="-mx-4 border-t border-edge px-4 pt-4 md:mx-0 md:border-0 md:px-0 md:pt-0">
       <h2 className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted">
         <span className="animate-live-dot inline-flex h-1.5 w-1.5 rounded-full bg-live" aria-hidden />
         <span className="text-live">Live</span> winners

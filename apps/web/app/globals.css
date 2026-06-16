@@ -248,7 +248,8 @@ a,
   .animate-float,
   .animate-shake,
   .animate-pending,
-  .animate-garden-loader {
+  .animate-garden-loader,
+  .animate-pulse {
     animation: none;
   }
 }

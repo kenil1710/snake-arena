@@ -6,14 +6,15 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { useAccount } from 'wagmi';
 import { useLeaderboard, type LeaderboardRow } from '@/hooks/useLeaderboard';
 import {
+  TIER_META,
   TOURNAMENT_TIER_IDS,
-  TOURNAMENT_TIERS,
   prizeBreakdown,
 } from '@/lib/contracts';
 import { formatUsdc, timeAgo, truncateAddress } from '@/lib/format';
 import { Countdown } from '@/components/Countdown';
 import { EntryFlow } from '@/components/EntryFlow';
 import { TierIcon } from '@/components/illustrations/TierIcon';
+import { Bush } from '@/components/illustrations/Bush';
 
 const TOP_N_SHOWN = 10;
 
@@ -38,7 +39,7 @@ function Row({ row, isUser }: { row: LeaderboardRow; isUser: boolean }) {
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.25 }}
-      className={`flex items-center gap-3 px-4 py-3 text-sm ${isUser ? 'bg-accent/[0.07]' : ''}`}
+      className={`flex items-center gap-3 px-4 py-3 text-sm ${isUser ? 'bg-coin/[0.08]' : ''}`}
     >
       <span
         className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-xs font-bold tabular-nums ${
@@ -50,7 +51,7 @@ function Row({ row, isUser }: { row: LeaderboardRow; isUser: boolean }) {
       <span className="min-w-0 flex-1 truncate font-medium">
         {row.username ?? truncateAddress(row.wallet)}
         {isUser && (
-          <span className="ml-2 rounded-full bg-accent px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-background">
+          <span className="ml-2 rounded-full bg-coin px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-coin-text">
             You
           </span>
         )}
@@ -64,7 +65,7 @@ function Row({ row, isUser }: { row: LeaderboardRow; isUser: boolean }) {
       {/* Re-keying on the score pulses it when a better run lands. */}
       <motion.span
         key={row.bestScore.toString()}
-        initial={{ scale: 1.25, color: '#2dd4bf' }}
+        initial={{ scale: 1.25, color: '#9FE1CB' }}
         animate={{ scale: 1, color: '#ffffff' }}
         transition={{ duration: 0.45 }}
         className="w-16 text-right font-mono font-semibold tabular-nums"
@@ -114,7 +115,13 @@ export default function LeaderboardPage({ params }: { params: { tournamentId: st
     : [];
 
   return (
-    <main className="mx-auto w-full max-w-2xl px-4 py-6 pb-[max(env(safe-area-inset-bottom),1.5rem)] sm:py-8">
+    <main className="relative mx-auto w-full max-w-2xl px-4 py-6 pb-[max(env(safe-area-inset-bottom),6.5rem)] sm:py-8 md:pb-12">
+      {/* Garden scenery at the foot of the board */}
+      <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-40 overflow-hidden">
+        <Bush variant="back" size={200} className="absolute -bottom-8 -left-10 opacity-[0.13]" />
+        <Bush variant="back" size={220} className="absolute -bottom-9 -right-10 opacity-[0.13]" />
+      </div>
+
       <Link
         href="/"
         className="inline-flex min-h-10 items-center text-sm text-muted transition-colors hover:text-white"
@@ -125,10 +132,10 @@ export default function LeaderboardPage({ params }: { params: { tournamentId: st
       {/* Tournament header */}
       <div className="mt-2 overflow-hidden rounded-card border bg-surface p-5 shadow-card sm:p-6">
         <div className="flex items-start justify-between gap-3">
-          <h1 className="flex items-center gap-2 text-base font-bold tracking-tight sm:text-lg">
+          <h1 className="font-display flex items-center gap-2 text-base font-bold tracking-tight sm:text-lg">
             {tierId && <TierIcon tierId={tierId} size={24} className="shrink-0" />}
             <span>
-              {tierId ? TOURNAMENT_TIERS[tierId].label : 'Tournament'}{' '}
+              {tierId ? TIER_META[tierId].displayName : 'Tournament'}{' '}
               <span className="font-normal text-muted">#{params.tournamentId}</span>
             </span>
           </h1>
@@ -212,12 +219,6 @@ export default function LeaderboardPage({ params }: { params: { tournamentId: st
           </AnimatePresence>
         </div>
 
-        {userRow && userRank !== null && userRank > TOP_N_SHOWN && (
-          <p className="border-t border-edge bg-accent/[0.07] px-4 py-3 text-sm">
-            You: <span className="font-mono font-semibold tabular-nums">#{userRank}</span> with{' '}
-            <span className="font-mono tabular-nums">{userRow.bestScore.toString()}</span> points
-          </p>
-        )}
       </section>
 
       {/* CTA */}
@@ -226,23 +227,40 @@ export default function LeaderboardPage({ params }: { params: { tournamentId: st
           {hasUnusedEntry ? (
             <Link
               href={`/play/${params.tournamentId}`}
-              className="bg-gradient-hero flex min-h-12 w-full items-center justify-center gap-1.5 rounded-btn text-sm font-bold text-background shadow-glow transition-opacity hover:opacity-90"
+              className="btn-sheen font-display flex min-h-12 w-full items-center justify-center gap-1.5 rounded-full text-sm font-bold text-coin-text shadow-glow transition-shadow hover:shadow-[0_0_28px_rgba(239,159,39,0.5)]"
             >
-              <span aria-hidden>▶</span> Play Now — you have an unused entry
+              <span aria-hidden>▶</span> Play now — you have an unused entry
             </Link>
           ) : (
             <button
               onClick={() => setEntryOpen(true)}
-              className="flex min-h-12 w-full items-center justify-center rounded-btn bg-accent text-sm font-bold text-background transition-all hover:bg-accent-hover hover:shadow-glow"
+              className="btn-sheen font-display flex min-h-12 w-full items-center justify-center rounded-full text-sm font-bold text-coin-text shadow-glow transition-shadow hover:shadow-[0_0_28px_rgba(239,159,39,0.5)]"
             >
               {userRow
-                ? `Enter Another ${formatUsdc(tournament.entryFee)}`
+                ? `Enter another ${formatUsdc(tournament.entryFee)}`
                 : `Enter ${formatUsdc(tournament.entryFee)}`}
             </button>
           )}
           <p className="mt-2 text-center text-xs text-muted">
             Each entry is one run — only your best score counts.
           </p>
+        </div>
+      )}
+
+      {/* Sticky your-rank bar when you're below the visible top N */}
+      {userRow && userRank !== null && userRank > TOP_N_SHOWN && (
+        <div className="sticky bottom-[5.5rem] z-20 mt-4 md:bottom-4">
+          <div className="flex items-center justify-between gap-3 rounded-full border border-coin/40 bg-surface/95 px-4 py-2.5 text-sm shadow-[0_8px_24px_rgba(3,18,15,0.6)] backdrop-blur">
+            <span className="flex items-center gap-2">
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-coin text-[10px] font-bold tabular-nums text-coin-text">
+                #{userRank}
+              </span>
+              <span className="font-semibold">You</span>
+            </span>
+            <span className="font-mono font-semibold tabular-nums text-coin">
+              {userRow.bestScore.toString()} pts
+            </span>
+          </div>
         </div>
       )}
 

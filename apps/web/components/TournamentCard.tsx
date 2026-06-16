@@ -1,9 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
+import { useAccount } from 'wagmi';
 import { Play, Trophy, Zap } from 'lucide-react';
 import {
   TIER_META,
@@ -12,6 +12,7 @@ import {
   type TournamentTierId,
 } from '@/lib/contracts';
 import { formatUsdc } from '@/lib/format';
+import { hasUnplayedEntry } from '@/lib/entriesUsed';
 import { fadeUp, springFast } from '@/lib/animations';
 import { Bush } from '@/components/illustrations/Bush';
 import { Countdown } from './Countdown';
@@ -91,6 +92,7 @@ export function TournamentCard({
   onEnter,
 }: TournamentCardProps) {
   const router = useRouter();
+  const { address } = useAccount();
   const config = TOURNAMENT_TIERS[tierId];
   const meta = TIER_META[tierId];
   const entered = (entryCount ?? 0n) > 0n;
@@ -104,6 +106,12 @@ export function TournamentCard({
 
   const idPath = tournament.id.toString();
   const openLeaderboard = () => router.push(`/leaderboard/${idPath}`);
+  // Entered players with an unplayed entry jump straight into a run; once those
+  // are used up, "Play" opens the entry flow to buy another attempt inline.
+  const handlePlay = () => {
+    if (hasUnplayedEntry(address, idPath, entryCount)) router.push(`/play/${idPath}`);
+    else onEnter();
+  };
 
   return (
     <motion.div
@@ -186,11 +194,11 @@ export function TournamentCard({
 
       {/* Current leader */}
       {leader && (
-        <div className="bg-gradient-gold relative mt-3 rounded-btn border border-coin/25 px-3 py-2">
-          <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-coin/80">
+        <div className="bg-gradient-gold relative mt-3 rounded-btn border border-coin/25 px-3 py-2.5">
+          <p className="text-[9px] font-bold uppercase leading-none tracking-[0.18em] text-coin/80">
             Current leader
           </p>
-          <div className="mt-1 flex items-center gap-2 text-[13px]">
+          <div className="mt-1.5 flex items-center gap-2 text-[13px] leading-none">
             <Trophy size={14} className="shrink-0 text-coin" aria-hidden />
             <span className="min-w-0 truncate font-medium">{leader.name}</span>
             <span className="font-display ml-auto shrink-0 font-bold tabular-nums text-coin">
@@ -204,12 +212,12 @@ export function TournamentCard({
       <div className="relative mt-5 flex gap-2.5" onClick={(event) => event.stopPropagation()}>
         {entered ? (
           <>
-            <Link
-              href={`/play/${idPath}`}
-              className="font-display flex min-h-12 flex-1 items-center justify-center gap-2 rounded-full bg-edge-bright text-sm font-bold text-background transition-[transform,box-shadow] hover:shadow-[0_6px_20px_rgba(29,158,117,0.45)] active:scale-95"
+            <button
+              onClick={handlePlay}
+              className="font-display flex min-h-12 flex-1 items-center justify-center gap-2 rounded-full bg-edge-bright text-sm font-bold text-background shadow-[0_0_16px_rgba(45,212,191,0.3)] transition-[transform,box-shadow] hover:shadow-[0_0_22px_rgba(45,212,191,0.45)] active:scale-95"
             >
               <Play size={15} fill="currentColor" aria-hidden /> Play
-            </Link>
+            </button>
             <button
               onClick={openLeaderboard}
               className="font-display flex min-h-12 flex-1 items-center justify-center gap-2 rounded-full border border-accent/40 text-sm font-semibold text-accent transition-colors hover:border-accent hover:bg-accent/10 active:scale-95"

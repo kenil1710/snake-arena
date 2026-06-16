@@ -11,6 +11,7 @@ import type { Direction } from '@snake-arena/shared';
 import { snakeArenaAbi } from '@/lib/abis/snakeArena';
 import {
   SNAKE_ARENA_ADDRESS,
+  TIER_META,
   TOURNAMENT_TIER_IDS,
   TOURNAMENT_TIERS,
   type ActiveTournament,
@@ -24,10 +25,14 @@ import {
 } from '@/lib/gameApi';
 import { sheetUp } from '@/lib/animations';
 import { formatUsdc } from '@/lib/format';
+import { markEntryUsed } from '@/lib/entriesUsed';
 import { playAppleSound, playDeathSound } from '@/lib/sounds';
 import { useLeaderboard } from '@/hooks/useLeaderboard';
 import { Countdown } from '@/components/Countdown';
-import { TierIcon } from '@/components/illustrations/TierIcon';
+import { Mascot } from '@/components/illustrations/Mascot';
+import { Bush } from '@/components/illustrations/Bush';
+import { GardenLoader } from '@/components/illustrations/GardenLoader';
+import { EntryFlow } from '@/components/EntryFlow';
 import { SnakeCanvas } from './SnakeCanvas';
 import { ScoreDisplay } from './ScoreDisplay';
 import { PowerUpBar } from './PowerUpBar';
@@ -67,11 +72,21 @@ export function GameClient({ tournamentId }: { tournamentId: number }) {
   const { address, isConnected } = useAccount();
   const publicClient = usePublicClient();
 
+  // Remember the last tournament opened — powers the bottom-nav Play button.
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('sa:lastTournament', String(tournamentId));
+    } catch {
+      /* storage disabled — non-critical */
+    }
+  }, [tournamentId]);
+
   const [sessionId, setSessionId] = useState<Hex | null>(null);
   const [gameState, setGameState] = useState<WireGameState | null>(null);
   const [startFailure, setStartFailure] = useState<StartFailure | null>(null);
-  const [scoreSubmitted, setScoreSubmitted] = useState(false);
   const [boardOpen, setBoardOpen] = useState(false);
+  const [entryOpen, setEntryOpen] = useState(false);
+  const [hasSteered, setHasSteered] = useState(false);
 
   // Lock background scroll while the mobile leaderboard sheet is up.
   useEffect(() => {
@@ -106,6 +121,9 @@ export function GameClient({ tournamentId }: { tournamentId: number }) {
   const entryCount = entryRead.data
     ? (entryRead.data as readonly [string, bigint, bigint, bigint])[3]
     : undefined;
+  const personalBest = entryRead.data
+    ? Number((entryRead.data as readonly [string, bigint, bigint, bigint])[1])
+    : 0;
 
   // Live rank for the info bar (shares query keys with the leaderboard panel).
   const { userRank } = useLeaderboard(BigInt(tournamentId));
@@ -149,11 +167,10 @@ export function GameClient({ tournamentId }: { tournamentId: number }) {
       }
 
       // Fallback for direct navigation: find this wallet's entries on-chain.
-      // cachedLogScan chunks the range (public RPCs cap getLogs at 10k blocks)
-      // and shares the profile page's per-address cache.
+      // cachedLogScan walks the range in chunks via the dedicated logs RPC and
+      // shares the profile page's per-address cache.
       try {
-        const logs = await cachedLogScan<EnteredArgs>({
-          client: publicClient,
+        const { logs } = await cachedLogScan<EnteredArgs>({
           event: ENTERED_TOURNAMENT_EVENT,
           args: { player: address },
           cacheKey: `entered:${address.toLowerCase()}`,
@@ -186,6 +203,7 @@ export function GameClient({ tournamentId }: { tournamentId: number }) {
           }
           applyState(initialState);
           setSessionId(id);
+          markEntryUsed(address, tournamentId);
           return;
         } catch (error) {
           if (error instanceof GameApiError) {
@@ -246,6 +264,7 @@ export function GameClient({ tournamentId }: { tournamentId: number }) {
   }, [sessionId, alive, applyState]);
 
   const handleDirection = useCallback((direction: Direction) => {
+    setHasSteered(true); // any steer attempt dismisses the swipe hint
     const current = stateRef.current;
     if (current && OPPOSITES[direction] === current.direction) return; // never legal
     desiredDirectionRef.current = direction;
@@ -256,37 +275,52 @@ export function GameClient({ tournamentId }: { tournamentId: number }) {
   if (!isConnected || !address) {
     return (
       <Screen>
-        <span className="text-3xl" aria-hidden>
-          🐍
-        </span>
+        <Mascot pose="happy" size={72} />
         <p className="text-sm text-secondary">Connect your wallet to play.</p>
-        <ConnectWallet className="!rounded-btn !bg-accent hover:!bg-accent-hover" />
+        <ConnectWallet className="!rounded-full !bg-accent hover:!bg-accent-hover" />
       </Screen>
     );
   }
 
   if (startFailure) {
+    const noFreshEntry = startFailure.kind === 'no-fresh-entry';
     return (
       <Screen>
-        <div className="w-full max-w-sm rounded-card border bg-surface p-6 shadow-card">
-          <p className="text-base font-bold tracking-tight">
-            {startFailure.kind === 'no-fresh-entry'
-              ? 'No unplayed entry found'
-              : 'Could not start the game'}
+        <div className="w-full max-w-sm rounded-card border bg-surface p-6 text-center shadow-card">
+          <Mascot pose="dead" size={64} className="mx-auto" />
+          <p className="font-display mt-2 text-base font-bold tracking-tight">
+            {noFreshEntry ? 'No unplayed entry found' : 'Could not start the game'}
           </p>
           <p className="mt-2 text-sm text-secondary">
-            {startFailure.kind === 'no-fresh-entry'
-              ? 'Each entry is one game attempt and all of yours have been played. Enter again from the lobby for another run.'
+            {noFreshEntry
+              ? 'Each entry is one game attempt. Pay again to keep playing.'
               : startFailure.message}
           </p>
-          <div className="mt-5 flex gap-2.5">
-            <Link
-              href="/"
-              className="flex min-h-12 flex-1 items-center justify-center rounded-btn bg-accent text-sm font-bold text-background transition-colors hover:bg-accent-hover"
-            >
-              Back to lobby
-            </Link>
-            {startFailure.kind !== 'no-fresh-entry' && (
+          {noFreshEntry ? (
+            <div className="mt-5 flex flex-col gap-2.5">
+              {tournament && tierId && (
+                <button
+                  onClick={() => setEntryOpen(true)}
+                  className="btn-sheen font-display flex min-h-12 w-full items-center justify-center rounded-full text-sm font-bold text-coin-text shadow-glow transition-shadow hover:shadow-[0_0_28px_rgba(239,159,39,0.5)]"
+                >
+                  Enter again — {formatUsdc(tournament.entryFee)}
+                </button>
+              )}
+              <Link
+                href="/"
+                className="font-display flex min-h-12 w-full items-center justify-center rounded-full border border-edge text-sm font-semibold text-secondary transition-colors hover:border-accent/50 hover:text-white"
+              >
+                Back to lobby
+              </Link>
+            </div>
+          ) : (
+            <div className="mt-5 flex gap-2.5">
+              <Link
+                href="/"
+                className="flex min-h-12 flex-1 items-center justify-center rounded-btn bg-accent text-sm font-bold text-background transition-colors hover:bg-accent-hover"
+              >
+                Back to lobby
+              </Link>
               <button
                 onClick={() => {
                   startingRef.current = false;
@@ -296,9 +330,24 @@ export function GameClient({ tournamentId }: { tournamentId: number }) {
               >
                 Retry
               </button>
-            )}
-          </div>
+            </div>
+          )}
         </div>
+
+        {/* Re-entry without leaving /play: a fresh paid entry, then GameClient's
+            scan picks up the new tx and starts the next run in place. */}
+        {entryOpen && tournament && tierId && (
+          <EntryFlow
+            tierId={tierId}
+            tournament={tournament}
+            redirectOnSuccess={false}
+            onEntered={() => {
+              startingRef.current = false;
+              setStartFailure(null);
+            }}
+            onClose={() => setEntryOpen(false)}
+          />
+        )}
       </Screen>
     );
   }
@@ -306,10 +355,7 @@ export function GameClient({ tournamentId }: { tournamentId: number }) {
   if (!sessionId || !gameState) {
     return (
       <Screen>
-        <span
-          aria-hidden
-          className="inline-block h-6 w-6 animate-spin rounded-full border-2 border-accent border-t-transparent"
-        />
+        <GardenLoader size={36} />
         <p className="text-sm text-secondary">
           {entryCount === undefined ? 'Checking your entry…' : 'Starting your game…'}
         </p>
@@ -320,8 +366,13 @@ export function GameClient({ tournamentId }: { tournamentId: number }) {
   // --- The game -------------------------------------------------------------
 
   return (
-    <div className="bg-game-glow min-h-[calc(100vh-3.5rem)]">
-      <main className="mx-auto w-full max-w-[1024px] px-4 py-6">
+    <div className="bg-game-glow relative min-h-[calc(100vh-3.5rem)]">
+      {/* Garden scenery — own clipped layer so it never breaks the sticky sidebar */}
+      <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-48 overflow-hidden">
+        <Bush variant="back" size={220} className="absolute -bottom-8 -left-12 opacity-20" />
+        <Bush variant="back" size={260} className="absolute -bottom-10 -right-14 opacity-20" />
+      </div>
+      <main className="relative z-10 mx-auto w-full max-w-[1024px] px-4 py-6">
       <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start lg:gap-8">
         {/* Game column */}
         <div className="mx-auto w-full max-w-[600px]">
@@ -335,10 +386,17 @@ export function GameClient({ tournamentId }: { tournamentId: number }) {
               ←
             </Link>
             <div className="glass flex min-h-10 flex-1 items-center justify-between gap-2 rounded-btn border border-white/10 px-3 py-1.5">
-              <span className="flex min-w-0 items-center gap-1.5">
-                {tierId && <TierIcon tierId={tierId} size={20} className="shrink-0" />}
-                <span className="truncate text-xs font-bold tracking-tight">
-                  {tierId ? TOURNAMENT_TIERS[tierId].label : '…'}
+              <span className="flex min-w-0 items-center gap-2">
+                {tierId && (
+                  <span
+                    className="font-display flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[9px] font-bold tabular-nums"
+                    style={{ backgroundColor: TIER_META[tierId].coinBg, color: TIER_META[tierId].coinFg }}
+                  >
+                    ${TOURNAMENT_TIERS[tierId].entryFeeUsdc}
+                  </span>
+                )}
+                <span className="font-display truncate text-xs font-bold tracking-tight">
+                  {tierId ? TIER_META[tierId].displayName : '…'}
                 </span>
               </span>
               <span className="flex shrink-0 items-center gap-2.5 text-xs">
@@ -359,34 +417,43 @@ export function GameClient({ tournamentId }: { tournamentId: number }) {
 
           <div className="relative mt-3">
             <SnakeCanvas state={gameState} onDirection={handleDirection} />
+            <AnimatePresence>
+              {gameState.alive && !hasSteered && (
+                <motion.div
+                  key="swipe-hint"
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                  className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center lg:hidden"
+                >
+                  <span className="rounded-full bg-background/80 px-3 py-1.5 text-xs font-medium text-accent-bright backdrop-blur">
+                    👆 Swipe to steer
+                  </span>
+                </motion.div>
+              )}
+            </AnimatePresence>
             {!gameState.alive && (
               <GameOver
                 state={gameState}
                 sessionId={sessionId}
                 tournamentId={tournamentId}
-                onSubmitted={() => setScoreSubmitted(true)}
-                onState={applyState}
+                personalBest={personalBest}
               />
             )}
           </div>
 
-          <PowerUpBar
-            sessionId={sessionId}
-            state={gameState}
-            scoreSubmitted={scoreSubmitted}
-            onState={applyState}
-          />
+          <PowerUpBar sessionId={sessionId} state={gameState} onState={applyState} />
 
           <button
             onClick={() => setBoardOpen(true)}
-            className="mt-4 flex min-h-12 w-full items-center justify-center gap-2 rounded-btn border bg-surface text-sm font-semibold text-secondary transition-colors hover:border-accent/50 hover:text-white lg:hidden"
+            className="mx-auto mt-4 flex w-fit items-center justify-center gap-2 rounded-full border border-edge bg-surface px-5 py-2.5 text-sm font-semibold text-secondary transition-colors hover:border-accent/50 hover:text-white lg:hidden"
           >
             <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-live" aria-hidden />
             Live leaderboard
           </button>
 
-          <p className="mt-3 text-center text-xs text-muted">
-            Arrow keys / WASD to steer · swipe on mobile
+          <p className="mt-3 hidden text-center text-xs text-muted lg:block">
+            Arrow keys / WASD to steer
           </p>
         </div>
 

@@ -8,7 +8,6 @@ import { useAccount, usePublicClient, useReadContract, useWriteContract } from '
 import {
   POWER_UP_ENUM_INDEX,
   POWER_UP_PRICES_USDC,
-  POWER_UP_TYPES,
   type PowerUpType,
 } from '@snake-arena/shared';
 import { toast } from '@/components/Toast';
@@ -21,11 +20,19 @@ import { activatePowerUp, GameApiError, type WireGameState } from '@/lib/gameApi
 const APPROVE_BUDGET = parseUnits('5', 6);
 
 const META: Record<PowerUpType, { Icon: LucideIcon; name: string; color: string }> = {
-  shield: { Icon: Shield, name: 'Shield', color: '#38bdf8' },
-  multiplier_2x: { Icon: Zap, name: '2× Multi', color: '#fbbf24' },
-  slowmo: { Icon: Snail, name: 'Slow-Mo', color: '#a78bfa' },
-  revive: { Icon: HeartPulse, name: 'Revive', color: '#34d399' },
+  shield: { Icon: Shield, name: 'Shield', color: '#9FE1CB' },
+  multiplier_2x: { Icon: Zap, name: '2×', color: '#EF9F27' },
+  slowmo: { Icon: Snail, name: 'Slow-Mo', color: '#5DCAA5' },
+  // Kept so PowerUpType stays exhaustive, but never rendered — the game is one
+  // life, one shot. Re-enter from the lobby for another attempt.
+  revive: { Icon: HeartPulse, name: 'Revive', color: '#E24B4A' },
 };
+
+/** The power-ups actually offered in-game. Revive is intentionally omitted. */
+const VISIBLE_POWER_UPS: PowerUpType[] = ['shield', 'multiplier_2x', 'slowmo'];
+
+/** Sub-dollar prices read better as cents on the chunky buttons. */
+const formatPrice = (usd: number) => (usd < 1 ? `${Math.round(usd * 100)}¢` : `$${usd.toFixed(2)}`);
 
 type Step = 'approving' | 'buying' | 'activating';
 
@@ -36,9 +43,8 @@ export const STEP_LABEL: Record<Step, string> = {
 };
 
 /**
- * The approve → buyPowerUp → activate flow, shared by the in-game bar and the
- * GameOver overlay's revive button. Each consumer gets its own pending/failure
- * state; the resulting server state funnels through `onState`.
+ * The approve → buyPowerUp → activate flow behind the in-game power-up bar.
+ * The resulting authoritative server state funnels back through `onState`.
  */
 export function usePowerUpPurchase(sessionId: Hex, onState: (state: WireGameState) => void) {
   const { address } = useAccount();
@@ -111,12 +117,10 @@ export function usePowerUpPurchase(sessionId: Hex, onState: (state: WireGameStat
 interface PowerUpBarProps {
   sessionId: Hex;
   state: WireGameState;
-  /** Once the score is on-chain, reviving would be wasted money — lock it. */
-  scoreSubmitted: boolean;
   onState: (state: WireGameState) => void;
 }
 
-export function PowerUpBar({ sessionId, state, scoreSubmitted, onState }: PowerUpBarProps) {
+export function PowerUpBar({ sessionId, state, onState }: PowerUpBarProps) {
   const { buy, pending, failure } = usePowerUpPurchase(sessionId, onState);
 
   const isActive = (type: PowerUpType): boolean => {
@@ -134,14 +138,13 @@ export function PowerUpBar({ sessionId, state, scoreSubmitted, onState }: PowerU
 
   const isEnabled = (type: PowerUpType): boolean => {
     if (pending) return false;
-    if (type === 'revive') return !state.alive && !scoreSubmitted;
     return state.alive && !isActive(type);
   };
 
   return (
     <div className="mt-4">
-      <div className="grid grid-cols-4 gap-2">
-        {POWER_UP_TYPES.map((type) => {
+      <div className="grid grid-cols-3 gap-2">
+        {VISIBLE_POWER_UPS.map((type) => {
           const { Icon, name, color } = META[type];
           const active = isActive(type);
           const isPending = pending?.type === type;
@@ -151,30 +154,35 @@ export function PowerUpBar({ sessionId, state, scoreSubmitted, onState }: PowerU
               onClick={() => buy(type)}
               disabled={!isEnabled(type)}
               whileTap={{ scale: 0.96 }}
-              style={
-                {
-                  '--pu': color,
-                  '--pu-glow': `${color}40`,
-                  ...(active ? { borderColor: color, boxShadow: `0 0 18px ${color}40` } : {}),
-                } as React.CSSProperties
-              }
-              className="flex flex-col items-center gap-1.5 rounded-btn border bg-surface px-1 py-3 text-center transition-[border-color,box-shadow,background-color] duration-200 enabled:hover:border-[color:var(--pu)] enabled:hover:shadow-[0_0_18px_var(--pu-glow)] disabled:cursor-not-allowed disabled:opacity-40"
+              style={{ '--pu': color, '--pu-glow': `${color}40` } as React.CSSProperties}
+              className={`relative flex h-16 flex-col items-center justify-center gap-1 overflow-hidden rounded-xl border bg-surface text-center transition-[border-color,box-shadow] duration-200 disabled:cursor-not-allowed disabled:opacity-40 ${
+                active
+                  ? 'border-coin shadow-[0_0_16px_rgba(239,159,39,0.4)]'
+                  : 'border-edge enabled:hover:border-[color:var(--pu)] enabled:hover:shadow-[0_0_16px_var(--pu-glow)]'
+              }`}
             >
               <Icon size={18} style={{ color }} aria-hidden />
-              <span className="text-xs font-semibold">{name}</span>
+              <span className="font-display text-xs font-bold leading-none">{name}</span>
               {isPending ? (
                 <span className="text-[10px] tabular-nums text-muted">{STEP_LABEL[pending.step]}</span>
               ) : active ? (
-                <span
-                  className="rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider"
-                  style={{ backgroundColor: `${color}26`, color }}
-                >
-                  Active
-                </span>
+                <span className="text-[9px] font-bold uppercase tracking-wider text-coin">Active</span>
               ) : (
-                <span className="font-mono text-[11px] tabular-nums text-muted">
-                  ${POWER_UP_PRICES_USDC[type].toFixed(2)}
+                <span className="font-mono text-[11px] font-semibold tabular-nums text-coin">
+                  {formatPrice(POWER_UP_PRICES_USDC[type])}
                 </span>
+              )}
+              {active && (
+                <span
+                  aria-hidden
+                  className="pointer-events-none absolute inset-0 animate-pulse rounded-xl ring-2 ring-coin/50"
+                />
+              )}
+              {isPending && (
+                <span
+                  aria-hidden
+                  className="animate-pending pointer-events-none absolute inset-0 rounded-xl"
+                />
               )}
             </motion.button>
           );

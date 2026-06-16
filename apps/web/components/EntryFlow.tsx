@@ -36,6 +36,10 @@ interface EntryFlowProps {
   tierId: TournamentTierId;
   tournament: ActiveTournament;
   onClose: () => void;
+  /** Lobby entries jump to /play; in-game re-entries stay put (default true). */
+  redirectOnSuccess?: boolean;
+  /** Fired after a confirmed entry when not redirecting, so the host can react. */
+  onEntered?: () => void;
 }
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
@@ -60,7 +64,7 @@ function PrimaryButton({
     <button
       onClick={onClick}
       disabled={disabled}
-      className="mt-5 flex min-h-12 w-full items-center justify-center gap-2 rounded-btn bg-accent text-sm font-bold text-background transition-all hover:bg-accent-hover hover:shadow-glow disabled:cursor-not-allowed disabled:bg-edge disabled:text-muted disabled:shadow-none"
+      className="btn-sheen font-display mt-5 flex min-h-12 w-full items-center justify-center gap-2 rounded-full text-sm font-bold text-coin-text shadow-glow transition-[box-shadow] hover:shadow-[0_0_28px_rgba(239,159,39,0.5)] disabled:cursor-not-allowed disabled:bg-edge disabled:bg-none disabled:text-muted disabled:shadow-none"
     >
       {children}
     </button>
@@ -71,12 +75,18 @@ function Spinner() {
   return (
     <span
       aria-hidden
-      className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-background border-t-transparent"
+      className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-coin-text border-t-transparent"
     />
   );
 }
 
-export function EntryFlow({ tierId, tournament, onClose }: EntryFlowProps) {
+export function EntryFlow({
+  tierId,
+  tournament,
+  onClose,
+  redirectOnSuccess = true,
+  onEntered,
+}: EntryFlowProps) {
   const router = useRouter();
   const { address, isConnected, chainId: walletChainId } = useAccount();
   const config = TOURNAMENT_TIERS[tierId];
@@ -136,22 +146,39 @@ export function EntryFlow({ tierId, tournament, onClose }: EntryFlowProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [approveReceipt.isSuccess]);
 
-  // Entry confirmed — hand off to the play page with the entry tx hash, which
-  // the game server needs to verify the paid entry before starting a session.
+  // Entry confirmed — stash the entry tx hash (the game server needs it to
+  // verify the paid entry before starting a session), then either hand off to
+  // the play page, or, for a re-entry from inside /play, just dismiss and let
+  // the already-mounted GameClient pick the fresh tx up from sessionStorage.
   useEffect(() => {
     if (!enterReceipt.isSuccess || !enter.data) return;
     const id = tournament.id.toString();
+    const entryTx = enter.data;
     try {
-      sessionStorage.setItem(`snakearena:entryTx:${id}`, enter.data);
+      sessionStorage.setItem(`snakearena:entryTx:${id}`, entryTx);
     } catch {
       // Storage unavailable (private mode) — the query param still carries it.
     }
     const timer = setTimeout(() => {
-      toast.success(`Entered ${formatUsdc(fee)} tournament — let's go 🐍`);
-      router.push(`/play/${id}?entryTx=${enter.data}`);
+      toast.success(`Entered ${config.label} — let's go 🐍`);
+      if (redirectOnSuccess) {
+        router.push(`/play/${id}?entryTx=${entryTx}`);
+      } else {
+        onEntered?.();
+        onClose();
+      }
     }, 900);
     return () => clearTimeout(timer);
-  }, [enterReceipt.isSuccess, enter.data, router, tournament.id, fee]);
+  }, [
+    enterReceipt.isSuccess,
+    enter.data,
+    router,
+    tournament.id,
+    config.label,
+    redirectOnSuccess,
+    onEntered,
+    onClose,
+  ]);
 
   const approving = approve.isPending || (Boolean(approve.data) && approveReceipt.isLoading);
   const entering = enter.isPending || (Boolean(enter.data) && enterReceipt.isLoading);
@@ -201,7 +228,7 @@ export function EntryFlow({ tierId, tournament, onClose }: EntryFlowProps) {
       {step === 'connect' && (
         <div className="mt-5 flex flex-col items-center gap-3">
           <p className="text-sm text-secondary">Connect your Coinbase Smart Wallet to enter.</p>
-          <ConnectWallet className="!rounded-btn !bg-accent hover:!bg-accent-hover" />
+          <ConnectWallet className="!rounded-full !bg-accent hover:!bg-accent-hover" />
         </div>
       )}
 
@@ -282,7 +309,7 @@ export function EntryFlow({ tierId, tournament, onClose }: EntryFlowProps) {
             placeholder="snakecharmer42"
             maxLength={20}
             autoFocus
-            className="mt-2 min-h-12 w-full rounded-input border bg-background px-3.5 text-sm outline-none transition-colors placeholder:text-muted/50 focus:border-accent"
+            className="mt-2 min-h-12 w-full rounded-input border bg-background px-3.5 text-sm outline-none transition-[border-color,box-shadow] placeholder:text-muted/50 focus:border-accent focus:ring-2 focus:ring-accent/30"
           />
           <p className="mt-1.5 text-xs text-muted">1–20 characters, letters and numbers only.</p>
           <PrimaryButton

@@ -28,7 +28,26 @@ export const USDC_ADDRESS = requireAddress(
 
 export const CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? 84532);
 export const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? 'http://localhost:3001';
-export const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL ?? 'https://sepolia.base.org';
+/**
+ * Base Sepolia RPC for every browser read (wagmi transport + event scans).
+ * Prefer the explicit, provider-specific name; fall back to the older generic
+ * one so existing .env.local files keep working. Point this at an Alchemy /
+ * Infura URL to escape the public RPC's tight getLogs rate limits.
+ */
+export const RPC_URL =
+  process.env.NEXT_PUBLIC_BASE_SEPOLIA_RPC_URL ??
+  process.env.NEXT_PUBLIC_RPC_URL ??
+  'https://sepolia.base.org';
+
+/**
+ * Range-permissive RPC for historical eth_getLogs scans. Provider free tiers
+ * (e.g. Alchemy) cap eth_getLogs at a ~10-block range, which makes scanning the
+ * contract's full history impractical (~21k requests); the public Base Sepolia
+ * endpoint allows a 2000-block range, so wide backfills take ~100 chunks. Keep
+ * this on a range-permissive endpoint even when RPC_URL is a provider key.
+ */
+export const LOGS_RPC_URL =
+  process.env.NEXT_PUBLIC_LOGS_RPC_URL ?? 'https://sepolia.base.org';
 export const EXPLORER_URL = 'https://sepolia.basescan.org';
 
 /** Block SnakeArena was deployed at — lower bound for profile event scans. */

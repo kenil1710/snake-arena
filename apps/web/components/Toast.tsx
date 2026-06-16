@@ -22,9 +22,9 @@ export function Toaster() {
         unstyled: false,
         classNames: {
           toast: `${BASE} !border-edge`,
-          success: `${BASE} !border-l-accent`,
+          success: `${BASE} !border-l-coin`,
           error: `${BASE} !border-l-danger`,
-          info: `${BASE} !border-l-secondary`,
+          info: `${BASE} !border-l-accent`,
           description: '!text-secondary',
         },
       }}

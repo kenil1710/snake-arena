@@ -46,7 +46,7 @@ export function Modal({ title, onClose, children }: ModalProps) {
           <span className="h-1 w-9 rounded-full bg-edge" />
         </div>
         <div className="flex items-center justify-between px-5 py-4">
-          <h2 className="text-sm font-semibold tracking-tight">{title}</h2>
+          <h2 className="font-display text-sm font-bold tracking-tight">{title}</h2>
           <button
             onClick={onClose}
             aria-label="Close"
