@@ -93,6 +93,10 @@ export function TournamentCard({
 }: TournamentCardProps) {
   const router = useRouter();
   const { address } = useAccount();
+  // hasUnplayedEntry reads localStorage — gate on mount so SSR and the first
+  // client render agree before the real value resolves.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
   const config = TOURNAMENT_TIERS[tierId];
   const meta = TIER_META[tierId];
   const entered = (entryCount ?? 0n) > 0n;
@@ -106,12 +110,10 @@ export function TournamentCard({
 
   const idPath = tournament.id.toString();
   const openLeaderboard = () => router.push(`/leaderboard/${idPath}`);
-  // Entered players with an unplayed entry jump straight into a run; once those
-  // are used up, "Play" opens the entry flow to buy another attempt inline.
-  const handlePlay = () => {
-    if (hasUnplayedEntry(address, idPath, entryCount)) router.push(`/play/${idPath}`);
-    else onEnter();
-  };
+  // An unplayed entry gets Play + Leaderboard; with none left, the card falls
+  // back to a single "Enter" that opens the entry flow for a fresh paid attempt.
+  const canPlay = mounted && hasUnplayedEntry(address, idPath, entryCount);
+  const handlePlay = () => router.push(`/play/${idPath}`);
 
   return (
     <motion.div
@@ -208,9 +210,9 @@ export function TournamentCard({
         </div>
       )}
 
-      {/* CTA row — entered players get Play + Leaderboard side by side */}
+      {/* CTA row — an unplayed entry gets Play + Leaderboard side by side */}
       <div className="relative mt-5 flex gap-2.5" onClick={(event) => event.stopPropagation()}>
-        {entered ? (
+        {canPlay ? (
           <>
             <button
               onClick={handlePlay}

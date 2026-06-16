@@ -3,14 +3,17 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { AnimatePresence, motion } from 'framer-motion';
-import { useAccount } from 'wagmi';
+import { useAccount, useReadContract } from 'wagmi';
 import { useLeaderboard, type LeaderboardRow } from '@/hooks/useLeaderboard';
+import { snakeArenaAbi } from '@/lib/abis/snakeArena';
 import {
+  SNAKE_ARENA_ADDRESS,
   TIER_META,
   TOURNAMENT_TIER_IDS,
   prizeBreakdown,
 } from '@/lib/contracts';
 import { formatUsdc, timeAgo, truncateAddress } from '@/lib/format';
+import { hasUnplayedEntry } from '@/lib/entriesUsed';
 import { Countdown } from '@/components/Countdown';
 import { EntryFlow } from '@/components/EntryFlow';
 import { TierIcon } from '@/components/illustrations/TierIcon';
@@ -84,18 +87,26 @@ export default function LeaderboardPage({ params }: { params: { tournamentId: st
   const { tournament, rows, userRank, userRow, isLoading } = useLeaderboard(tournamentId);
   const [entryOpen, setEntryOpen] = useState(false);
 
-  // sessionStorage is browser-only — resolve the unused-entry hint post-mount
-  // to keep server and client markup identical.
-  const [hasUnusedEntry, setHasUnusedEntry] = useState(false);
-  useEffect(() => {
-    try {
-      setHasUnusedEntry(
-        Boolean(sessionStorage.getItem(`snakearena:entryTx:${params.tournamentId}`)),
-      );
-    } catch {
-      setHasUnusedEntry(false);
-    }
-  }, [params.tournamentId]);
+  // Authoritative per-wallet entry count straight from the contract — drives the
+  // "play your unplayed entry" CTA regardless of whether the wallet shows up in
+  // the (possibly capped) leaderboard, and survives closing/reopening the tab.
+  const entryRead = useReadContract({
+    address: SNAKE_ARENA_ADDRESS,
+    abi: snakeArenaAbi,
+    functionName: 'entries',
+    args: address ? [tournamentId, address] : undefined,
+    query: { enabled: valid && Boolean(address) },
+  });
+  const entryCount = entryRead.data
+    ? (entryRead.data as readonly [string, bigint, bigint, bigint])[3]
+    : undefined;
+  const entered = (entryCount ?? 0n) > 0n;
+
+  // hasUnplayedEntry reads localStorage — gate on mount so server and first
+  // client render produce identical markup (no hydration mismatch).
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  const canPlay = mounted && hasUnplayedEntry(address, params.tournamentId, entryCount);
 
   if (!valid) {
     return (
@@ -221,27 +232,27 @@ export default function LeaderboardPage({ params }: { params: { tournamentId: st
 
       </section>
 
-      {/* CTA */}
+      {/* CTA — an unplayed entry can be played straight away; entering again is
+          always available below it. */}
       {tournament && tierId && (
-        <div className="mt-4">
-          {hasUnusedEntry ? (
+        <div className="mt-4 flex flex-col gap-2.5">
+          {canPlay && (
             <Link
               href={`/play/${params.tournamentId}`}
-              className="btn-sheen font-display flex min-h-12 w-full items-center justify-center gap-1.5 rounded-full text-sm font-bold text-coin-text shadow-glow transition-shadow hover:shadow-[0_0_28px_rgba(239,159,39,0.5)]"
+              className="font-display flex min-h-12 w-full items-center justify-center gap-1.5 rounded-full bg-edge-bright text-sm font-bold text-background shadow-[0_0_16px_rgba(45,212,191,0.3)] transition-[transform,box-shadow] hover:shadow-[0_0_22px_rgba(45,212,191,0.45)] active:scale-95"
             >
-              <span aria-hidden>▶</span> Play now — you have an unused entry
+              <span aria-hidden>▶</span> Play your entry
             </Link>
-          ) : (
-            <button
-              onClick={() => setEntryOpen(true)}
-              className="btn-sheen font-display flex min-h-12 w-full items-center justify-center rounded-full text-sm font-bold text-coin-text shadow-glow transition-shadow hover:shadow-[0_0_28px_rgba(239,159,39,0.5)]"
-            >
-              {userRow
-                ? `Enter another ${formatUsdc(tournament.entryFee)}`
-                : `Enter ${formatUsdc(tournament.entryFee)}`}
-            </button>
           )}
-          <p className="mt-2 text-center text-xs text-muted">
+          <button
+            onClick={() => setEntryOpen(true)}
+            className="btn-sheen font-display flex min-h-12 w-full items-center justify-center rounded-full text-sm font-bold text-coin-text shadow-glow transition-shadow hover:shadow-[0_0_28px_rgba(239,159,39,0.5)]"
+          >
+            {entered
+              ? `Enter another ${formatUsdc(tournament.entryFee)}`
+              : `Enter ${formatUsdc(tournament.entryFee)}`}
+          </button>
+          <p className="text-center text-xs text-muted">
             Each entry is one run — only your best score counts.
           </p>
         </div>
