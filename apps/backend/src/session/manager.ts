@@ -108,6 +108,24 @@ export class SessionManager {
   }
 
   /**
+   * Returns the live (unexpired) session started by this entry tx, if any.
+   * Expired matches are pruned. Note a `null` here with hasEntryBeenUsed=true
+   * just means the session has since aged out — the entry was still played.
+   */
+  findByEntryTx(entryTxHash: string): GameSession | undefined {
+    const key = entryTxHash.toLowerCase();
+    for (const session of this.sessions.values()) {
+      if (session.entryTxHash.toLowerCase() !== key) continue;
+      if (this.isExpired(session)) {
+        this.sessions.delete(session.id);
+        return undefined;
+      }
+      return session;
+    }
+    return undefined;
+  }
+
+  /**
    * Atomically marks a power-up payment tx as consumed. Returns false if it was
    * already used (the purchase must not activate twice).
    */

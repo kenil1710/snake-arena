@@ -36,10 +36,6 @@ interface EntryFlowProps {
   tierId: TournamentTierId;
   tournament: ActiveTournament;
   onClose: () => void;
-  /** Lobby entries jump to /play; in-game re-entries stay put (default true). */
-  redirectOnSuccess?: boolean;
-  /** Fired after a confirmed entry when not redirecting, so the host can react. */
-  onEntered?: () => void;
 }
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
@@ -80,13 +76,7 @@ function Spinner() {
   );
 }
 
-export function EntryFlow({
-  tierId,
-  tournament,
-  onClose,
-  redirectOnSuccess = true,
-  onEntered,
-}: EntryFlowProps) {
+export function EntryFlow({ tierId, tournament, onClose }: EntryFlowProps) {
   const router = useRouter();
   const { address, isConnected, chainId: walletChainId } = useAccount();
   const config = TOURNAMENT_TIERS[tierId];
@@ -95,6 +85,7 @@ export function EntryFlow({
   const [usernameInput, setUsernameInput] = useState('');
   const [usernameConfirmed, setUsernameConfirmed] = useState(false);
   const [switchRejected, setSwitchRejected] = useState(false);
+  const [navStuck, setNavStuck] = useState(false);
 
   const { switchChainAsync, isPending: switching } = useSwitchChain();
 
@@ -146,39 +137,32 @@ export function EntryFlow({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [approveReceipt.isSuccess]);
 
-  // Entry confirmed — stash the entry tx hash (the game server needs it to
-  // verify the paid entry before starting a session), then either hand off to
-  // the play page, or, for a re-entry from inside /play, just dismiss and let
-  // the already-mounted GameClient pick the fresh tx up from sessionStorage.
+  // Entry confirmed → go straight to the game. Stash a lastEntry fallback (so
+  // the play page can recover the tx if the query param is lost), toast, wait
+  // 500ms for state to settle, then navigate. If we're somehow still mounted a
+  // few seconds later the push didn't take, so expose a manual "Start game now"
+  // button rather than leaving the player stranded with a paid entry.
   useEffect(() => {
     if (!enterReceipt.isSuccess || !enter.data) return;
     const id = tournament.id.toString();
     const entryTx = enter.data;
+    const target = `/play/${id}?entryTx=${entryTx}`;
     try {
-      sessionStorage.setItem(`snakearena:entryTx:${id}`, entryTx);
+      sessionStorage.setItem(
+        'lastEntry',
+        JSON.stringify({ tournamentId: id, txHash: entryTx, timestamp: Date.now() }),
+      );
     } catch {
       // Storage unavailable (private mode) — the query param still carries it.
     }
-    const timer = setTimeout(() => {
-      toast.success(`Entered ${config.label} — let's go 🐍`);
-      if (redirectOnSuccess) {
-        router.push(`/play/${id}?entryTx=${entryTx}`);
-      } else {
-        onEntered?.();
-        onClose();
-      }
-    }, 900);
-    return () => clearTimeout(timer);
-  }, [
-    enterReceipt.isSuccess,
-    enter.data,
-    router,
-    tournament.id,
-    config.label,
-    redirectOnSuccess,
-    onEntered,
-    onClose,
-  ]);
+    toast.success(`Entered ${formatUsdc(fee)} — let's play 🐍`);
+    const go = setTimeout(() => router.push(target), 500);
+    const watchdog = setTimeout(() => setNavStuck(true), 3000);
+    return () => {
+      clearTimeout(go);
+      clearTimeout(watchdog);
+    };
+  }, [enterReceipt.isSuccess, enter.data, router, tournament.id, fee]);
 
   const approving = approve.isPending || (Boolean(approve.data) && approveReceipt.isLoading);
   const entering = enter.isPending || (Boolean(enter.data) && enterReceipt.isLoading);
@@ -369,7 +353,19 @@ export function EntryFlow({
             ✓
           </motion.span>
           <p className="mt-3 text-sm font-bold">Entry confirmed</p>
-          <p className="mt-1 text-sm text-secondary">Taking you to the game…</p>
+          {navStuck ? (
+            <>
+              <p className="mt-1 text-sm text-secondary">Almost there — tap to start.</p>
+              <button
+                onClick={() => router.push(`/play/${tournament.id}?entryTx=${enter.data}`)}
+                className="btn-sheen font-display mt-3 flex min-h-12 w-full items-center justify-center gap-1.5 rounded-full text-sm font-bold text-coin-text shadow-glow transition-shadow hover:shadow-[0_0_28px_rgba(239,159,39,0.5)]"
+              >
+                <span aria-hidden>▶</span> Start game now
+              </button>
+            </>
+          ) : (
+            <p className="mt-1 text-sm text-secondary">Taking you to the game…</p>
+          )}
         </div>
       )}
     </Modal>

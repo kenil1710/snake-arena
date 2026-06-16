@@ -38,6 +38,28 @@ export class GameApiError extends Error {
   }
 }
 
+async function get<T>(path: string): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(`${BACKEND_URL}${path}`);
+  } catch {
+    throw new GameApiError(
+      'BACKEND_UNREACHABLE',
+      `Game server is unreachable at ${BACKEND_URL} — is the backend running?`,
+      0,
+    );
+  }
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new GameApiError(
+      typeof payload.error === 'string' ? payload.error : 'UNKNOWN',
+      typeof payload.message === 'string' ? payload.message : `Request failed (${response.status})`,
+      response.status,
+    );
+  }
+  return payload as T;
+}
+
 async function post<T>(path: string, body: unknown): Promise<T> {
   let response: Response;
   try {
@@ -91,4 +113,15 @@ export function activatePowerUp(params: {
 
 export function endSession(params: { sessionId: string }): Promise<SignedScore> {
   return post('/api/session/end', params);
+}
+
+/** Whether a paid entry tx has been turned into a game session yet. */
+export interface SessionByTx {
+  exists: boolean;
+  sessionId?: `0x${string}`;
+  status?: 'playing' | 'died' | 'submitted';
+}
+
+export function getSessionByTx(txHash: string): Promise<SessionByTx> {
+  return get(`/api/sessions/by-tx?txHash=${txHash}`);
 }

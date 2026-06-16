@@ -12,7 +12,7 @@ import { snakeArenaAbi } from '@/lib/abis/snakeArena';
 import { SNAKE_ARENA_ADDRESS } from '@/lib/contracts';
 import { toast } from '@/components/Toast';
 import { confettiColors } from '@/lib/design-tokens';
-import { errorMessage } from '@/lib/format';
+import { errorMessage, formatUsdc } from '@/lib/format';
 import { endSession, GameApiError, type WireGameState } from '@/lib/gameApi';
 import { Mascot } from '@/components/illustrations/Mascot';
 
@@ -50,9 +50,20 @@ interface GameOverProps {
   tournamentId: number;
   /** Best score already on-chain for this player, this tournament. */
   personalBest: number;
+  /** Entry fee for this tournament — shown on the "Play again — $X" button. */
+  entryFee: bigint | undefined;
+  /** Opens the entry flow for a fresh paid run of the same tournament. */
+  onPlayAgain: () => void;
 }
 
-export function GameOver({ state, sessionId, tournamentId, personalBest }: GameOverProps) {
+export function GameOver({
+  state,
+  sessionId,
+  tournamentId,
+  personalBest,
+  entryFee,
+  onPlayAgain,
+}: GameOverProps) {
   const router = useRouter();
   const publicClient = usePublicClient();
   const { writeContractAsync } = useWriteContract();
@@ -210,13 +221,14 @@ export function GameOver({ state, sessionId, tournamentId, personalBest }: GameO
             </button>
           )}
 
-          {/* Play again returns to the lobby — a new run is a fresh paid entry. */}
-          <Link
-            href="/"
+          {/* A new run is a fresh paid entry: opens the entry flow for this same
+              tournament, which then redirects into the new game. */}
+          <button
+            onClick={onPlayAgain}
             className="font-display flex min-h-11 w-full items-center justify-center rounded-full border border-edge text-sm font-semibold text-secondary transition-colors hover:border-accent/50 hover:text-white"
           >
-            Play again
-          </Link>
+            {entryFee !== undefined ? `Play again — ${formatUsdc(entryFee)}` : 'Play again'}
+          </button>
         </div>
 
         <a

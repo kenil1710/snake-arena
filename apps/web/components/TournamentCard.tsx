@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { useAccount } from 'wagmi';
 import { Play, Trophy, Zap } from 'lucide-react';
 import {
   TIER_META,
@@ -12,7 +11,6 @@ import {
   type TournamentTierId,
 } from '@/lib/contracts';
 import { formatUsdc } from '@/lib/format';
-import { hasUnplayedEntry } from '@/lib/entriesUsed';
 import { fadeUp, springFast } from '@/lib/animations';
 import { Bush } from '@/components/illustrations/Bush';
 import { Countdown } from './Countdown';
@@ -29,6 +27,8 @@ interface TournamentCardProps {
   tournament: ActiveTournament | undefined;
   /** Caller's entry count in this tournament (undefined when disconnected). */
   entryCount: bigint | undefined;
+  /** Caller's best score here; > 0 reveals the secondary Leaderboard button. */
+  bestScore: bigint | undefined;
   /** Top 3 ranked players, best first (empty until someone scores). */
   top3: TopPlayerTeaser[];
   /** Wallet connected? Drives the CTA copy for visitors. */
@@ -87,19 +87,16 @@ export function TournamentCard({
   tierId,
   tournament,
   entryCount,
+  bestScore,
   top3,
   connected,
   onEnter,
 }: TournamentCardProps) {
   const router = useRouter();
-  const { address } = useAccount();
-  // hasUnplayedEntry reads localStorage — gate on mount so SSR and the first
-  // client render agree before the real value resolves.
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
   const config = TOURNAMENT_TIERS[tierId];
   const meta = TIER_META[tierId];
   const entered = (entryCount ?? 0n) > 0n;
+  const hasScore = (bestScore ?? 0n) > 0n;
   const leader = top3[0];
   const hourly = config.durationHours === 1;
   const secondsLeft = useSecondsLeft(tournament?.endTime);
@@ -110,10 +107,6 @@ export function TournamentCard({
 
   const idPath = tournament.id.toString();
   const openLeaderboard = () => router.push(`/leaderboard/${idPath}`);
-  // An unplayed entry gets Play + Leaderboard; with none left, the card falls
-  // back to a single "Enter" that opens the entry flow for a fresh paid attempt.
-  const canPlay = mounted && hasUnplayedEntry(address, idPath, entryCount);
-  const handlePlay = () => router.push(`/play/${idPath}`);
 
   return (
     <motion.div
@@ -210,40 +203,33 @@ export function TournamentCard({
         </div>
       )}
 
-      {/* CTA row — an unplayed entry gets Play + Leaderboard side by side */}
+      {/* CTA row — every play is a fresh paid entry, so Enter is always primary;
+          a player who already has a score also gets a Leaderboard shortcut. */}
       <div className="relative mt-5 flex gap-2.5" onClick={(event) => event.stopPropagation()}>
-        {canPlay ? (
+        {connected ? (
           <>
             <button
-              onClick={handlePlay}
-              className="font-display flex min-h-12 flex-1 items-center justify-center gap-2 rounded-full bg-edge-bright text-sm font-bold text-background shadow-[0_0_16px_rgba(45,212,191,0.3)] transition-[transform,box-shadow] hover:shadow-[0_0_22px_rgba(45,212,191,0.45)] active:scale-95"
+              onClick={onEnter}
+              className="btn-sheen font-display flex min-h-12 flex-1 items-center justify-center gap-2 rounded-full text-sm font-bold text-coin-text transition-[transform,box-shadow] hover:shadow-glow active:scale-95"
             >
-              <Play size={15} fill="currentColor" aria-hidden /> Play
+              <Play size={15} fill="currentColor" aria-hidden />
+              Enter {formatUsdc(tournament.entryFee)}
             </button>
-            <button
-              onClick={openLeaderboard}
-              className="font-display flex min-h-12 flex-1 items-center justify-center gap-2 rounded-full border border-accent/40 text-sm font-semibold text-accent transition-colors hover:border-accent hover:bg-accent/10 active:scale-95"
-            >
-              <Trophy size={15} aria-hidden /> Leaderboard
-            </button>
+            {hasScore && (
+              <button
+                onClick={openLeaderboard}
+                className="font-display flex min-h-12 flex-1 items-center justify-center gap-2 rounded-full border border-accent/40 text-sm font-semibold text-accent transition-colors hover:border-accent hover:bg-accent/10 active:scale-95"
+              >
+                <Trophy size={15} aria-hidden /> Leaderboard
+              </button>
+            )}
           </>
         ) : (
           <button
             onClick={onEnter}
-            className={`font-display flex min-h-12 w-full items-center justify-center gap-2 rounded-full text-sm font-bold transition-[transform,box-shadow] active:scale-95 ${
-              connected
-                ? 'btn-sheen text-coin-text hover:shadow-glow'
-                : 'border border-edge bg-surface-elevated text-secondary hover:border-accent/50 hover:text-white'
-            }`}
+            className="font-display flex min-h-12 w-full items-center justify-center gap-2 rounded-full border border-edge bg-surface-elevated text-sm font-bold text-secondary transition-colors hover:border-accent/50 hover:text-white active:scale-95"
           >
-            {connected ? (
-              <>
-                <Play size={15} fill="currentColor" aria-hidden />
-                Enter {formatUsdc(tournament.entryFee)}
-              </>
-            ) : (
-              'Connect to enter'
-            )}
+            Connect to enter
           </button>
         )}
       </div>

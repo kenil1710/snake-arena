@@ -5,6 +5,7 @@ import type { SessionManager } from './session/manager.js';
 import type { ChainVerifier } from './chain/verify.js';
 import type { ScoreSigner } from './signer/sign.js';
 import { createSessionRouter } from './routes/session.js';
+import { createSessionsRouter } from './routes/sessions.js';
 import { createHealthRouter } from './routes/health.js';
 import { createAdminRouter, type AdminRouterDeps } from './routes/admin.js';
 import { errorHandler, notFoundHandler } from './middleware/errors.js';
@@ -43,6 +44,7 @@ export function createApp(deps: AppDeps): Express {
 
   app.use('/api', createHealthRouter(deps));
   app.use('/api/session', createSessionRouter(deps));
+  app.use('/api/sessions', createSessionsRouter({ sessions: deps.sessions }));
   app.use('/api/admin', createAdminRouter({ config: deps.config, finalizer: deps.finalizer ?? null }));
 
   app.use(notFoundHandler);

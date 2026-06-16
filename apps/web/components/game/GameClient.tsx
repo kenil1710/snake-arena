@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { AnimatePresence, motion } from 'framer-motion';
 import type { Hex } from 'viem';
-import { useAccount, usePublicClient, useReadContract } from 'wagmi';
+import { useAccount, useReadContract } from 'wagmi';
 import { ConnectWallet } from '@coinbase/onchainkit/wallet';
 import type { Direction } from '@snake-arena/shared';
 import { snakeArenaAbi } from '@/lib/abis/snakeArena';
@@ -16,7 +16,6 @@ import {
   TOURNAMENT_TIERS,
   type ActiveTournament,
 } from '@/lib/contracts';
-import { cachedLogScan, ENTERED_TOURNAMENT_EVENT, type EnteredArgs } from '@/lib/events';
 import {
   GameApiError,
   sendMove,
@@ -25,7 +24,6 @@ import {
 } from '@/lib/gameApi';
 import { sheetUp } from '@/lib/animations';
 import { formatUsdc } from '@/lib/format';
-import { markEntryUsed } from '@/lib/entriesUsed';
 import { playAppleSound, playDeathSound } from '@/lib/sounds';
 import { useLeaderboard } from '@/hooks/useLeaderboard';
 import { Countdown } from '@/components/Countdown';
@@ -52,8 +50,7 @@ const OPPOSITES: Record<Direction, Direction> = {
 const TX_HASH_PATTERN = /^0x[0-9a-fA-F]{64}$/;
 
 type StartFailure =
-  | { kind: 'no-fresh-entry' }
-  | { kind: 'backend-down'; message: string }
+  | { kind: 'already-used' }
   | { kind: 'error'; message: string };
 
 function Screen({ children }: { children: React.ReactNode }) {
@@ -70,16 +67,6 @@ export function GameClient({ tournamentId }: { tournamentId: number }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { address, isConnected } = useAccount();
-  const publicClient = usePublicClient();
-
-  // Remember the last tournament opened — powers the bottom-nav Play button.
-  useEffect(() => {
-    try {
-      window.localStorage.setItem('sa:lastTournament', String(tournamentId));
-    } catch {
-      /* storage disabled — non-critical */
-    }
-  }, [tournamentId]);
 
   const [sessionId, setSessionId] = useState<Hex | null>(null);
   const [gameState, setGameState] = useState<WireGameState | null>(null);
@@ -118,9 +105,6 @@ export function GameClient({ tournamentId }: { tournamentId: number }) {
     args: address ? [BigInt(tournamentId), address] : undefined,
     query: { enabled: Boolean(address) },
   });
-  const entryCount = entryRead.data
-    ? (entryRead.data as readonly [string, bigint, bigint, bigint])[3]
-    : undefined;
   const personalBest = entryRead.data
     ? Number((entryRead.data as readonly [string, bigint, bigint, bigint])[1])
     : 0;
@@ -138,98 +122,92 @@ export function GameClient({ tournamentId }: { tournamentId: number }) {
     setGameState(next);
   }, []);
 
-  // Not entered → back to the lobby.
+  // Start the session from the paid entry tx — the ?entryTx query param, or the
+  // lastEntry fallback EntryFlow saved (this tournament, < 10 min old). With no
+  // entry tx there is nothing to play, so head back to the lobby to enter. The
+  // backend may not have seen the entry tx yet (RPC propagation), so retry a few
+  // times before surfacing a refusable error; once we hold an entry tx we never
+  // bounce the player off the page — their payment is on-chain.
   useEffect(() => {
-    if (entryCount !== undefined && entryCount === 0n) {
-      router.replace('/?error=not-entered');
-    }
-  }, [entryCount, router]);
-
-  // Start the session once the wallet + a paid entry are confirmed. Candidate
-  // entry txs are tried newest-first: each tx hash buys exactly one session.
-  useEffect(() => {
-    if (!address || !publicClient || sessionId || startFailure) return;
-    if (entryCount === undefined || entryCount === 0n) return;
+    if (!address || sessionId || startFailure) return;
     if (startingRef.current) return; // StrictMode double-invoke guard
-    startingRef.current = true;
 
-    const storageKey = `snakearena:entryTx:${tournamentId}`;
+    let entryTx: string | null = null;
+    const fromParam = searchParams.get('entryTx');
+    if (fromParam && TX_HASH_PATTERN.test(fromParam)) {
+      entryTx = fromParam;
+    } else {
+      try {
+        const raw = sessionStorage.getItem('lastEntry');
+        if (raw) {
+          const last = JSON.parse(raw) as {
+            tournamentId?: string;
+            txHash?: string;
+            timestamp?: number;
+          };
+          if (
+            last.txHash &&
+            TX_HASH_PATTERN.test(last.txHash) &&
+            String(last.tournamentId) === String(tournamentId) &&
+            typeof last.timestamp === 'number' &&
+            Date.now() - last.timestamp < 10 * 60 * 1000
+          ) {
+            entryTx = last.txHash;
+          }
+        }
+      } catch {
+        // Storage unavailable — only the query param can carry the entry.
+      }
+    }
+
+    if (!entryTx) {
+      router.replace('/?error=no-entry');
+      return;
+    }
+
+    startingRef.current = true;
+    const tx = entryTx;
 
     (async () => {
-      const candidates: string[] = [];
-      const fromParam = searchParams.get('entryTx');
-      if (fromParam && TX_HASH_PATTERN.test(fromParam)) candidates.push(fromParam);
-      try {
-        const stored = sessionStorage.getItem(storageKey);
-        if (stored && TX_HASH_PATTERN.test(stored)) candidates.push(stored);
-      } catch {
-        // Storage unavailable — other sources still apply.
-      }
-
-      // Fallback for direct navigation: find this wallet's entries on-chain.
-      // cachedLogScan walks the range in chunks via the dedicated logs RPC and
-      // shares the profile page's per-address cache.
-      try {
-        const { logs } = await cachedLogScan<EnteredArgs>({
-          event: ENTERED_TOURNAMENT_EVENT,
-          args: { player: address },
-          cacheKey: `entered:${address.toLowerCase()}`,
-        });
-        const mine = logs
-          .filter((log) => log.args.tournamentId === BigInt(tournamentId))
-          .sort((a, b) => Number(b.blockNumber - a.blockNumber));
-        for (const log of mine) candidates.push(log.transactionHash);
-      } catch {
-        // RPC hiccup — explicit candidates may still work.
-      }
-
-      const unique = [...new Set(candidates.map((tx) => tx.toLowerCase()))];
-      if (unique.length === 0) {
-        setStartFailure({ kind: 'no-fresh-entry' });
-        return;
-      }
-
-      for (const entryTxHash of unique) {
+      const MAX_ATTEMPTS = 3;
+      for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
         try {
           const { sessionId: id, initialState } = await startSession({
             walletAddress: address,
             tournamentId,
-            entryTxHash,
+            entryTxHash: tx,
           });
+          applyState(initialState);
+          setSessionId(id);
+          // Consumed — drop the fallback so it can't replay a used entry.
           try {
-            sessionStorage.removeItem(storageKey);
+            const raw = sessionStorage.getItem('lastEntry');
+            if (raw && (JSON.parse(raw)?.txHash ?? '').toLowerCase() === tx.toLowerCase()) {
+              sessionStorage.removeItem('lastEntry');
+            }
           } catch {
             // Best effort — the server tracks used entries regardless.
           }
-          applyState(initialState);
-          setSessionId(id);
-          markEntryUsed(address, tournamentId);
           return;
         } catch (error) {
-          if (error instanceof GameApiError) {
-            if (error.code === 'BACKEND_UNREACHABLE') {
-              setStartFailure({ kind: 'backend-down', message: error.message });
-              return;
-            }
-            // ENTRY_ALREADY_USED / ENTRY_VERIFICATION_FAILED → try the next tx.
-            continue;
+          // Already played → retrying can't help; offer a fresh paid entry.
+          if (error instanceof GameApiError && error.code === 'ENTRY_ALREADY_USED') {
+            setStartFailure({ kind: 'already-used' });
+            return;
           }
-          setStartFailure({ kind: 'error', message: String(error) });
-          return;
+          if (attempt === MAX_ATTEMPTS) {
+            setStartFailure({
+              kind: 'error',
+              message: error instanceof Error ? error.message : String(error),
+            });
+            return;
+          }
+          // Entry tx may not have propagated to the backend yet — wait and retry.
+          await new Promise((resolve) => setTimeout(resolve, 2000));
         }
       }
-      setStartFailure({ kind: 'no-fresh-entry' });
     })();
-  }, [
-    address,
-    publicClient,
-    sessionId,
-    startFailure,
-    entryCount,
-    tournamentId,
-    searchParams,
-    applyState,
-  ]);
+  }, [address, sessionId, startFailure, searchParams, tournamentId, router, applyState]);
 
   // Tick loop: the server advances one tick per /move request, so the client
   // posts its current heading on a fixed cadence (halved during slow-mo).
@@ -283,70 +261,49 @@ export function GameClient({ tournamentId }: { tournamentId: number }) {
   }
 
   if (startFailure) {
-    const noFreshEntry = startFailure.kind === 'no-fresh-entry';
+    const alreadyUsed = startFailure.kind === 'already-used';
     return (
       <Screen>
         <div className="w-full max-w-sm rounded-card border bg-surface p-6 text-center shadow-card">
           <Mascot pose="dead" size={64} className="mx-auto" />
           <p className="font-display mt-2 text-base font-bold tracking-tight">
-            {noFreshEntry ? 'No unplayed entry found' : 'Could not start the game'}
+            {alreadyUsed ? 'This entry was already played' : 'Couldn’t start your game'}
           </p>
           <p className="mt-2 text-sm text-secondary">
-            {noFreshEntry
-              ? 'Each entry is one game attempt. Pay again to keep playing.'
-              : startFailure.message}
+            {alreadyUsed
+              ? 'Each entry is one game attempt. Enter again to play another run.'
+              : 'Your entry is recorded on-chain — please refresh to try again.'}
           </p>
-          {noFreshEntry ? (
-            <div className="mt-5 flex flex-col gap-2.5">
-              {tournament && tierId && (
+          <div className="mt-5 flex flex-col gap-2.5">
+            {alreadyUsed
+              ? tournament &&
+                tierId && (
+                  <button
+                    onClick={() => setEntryOpen(true)}
+                    className="btn-sheen font-display flex min-h-12 w-full items-center justify-center rounded-full text-sm font-bold text-coin-text shadow-glow transition-shadow hover:shadow-[0_0_28px_rgba(239,159,39,0.5)]"
+                  >
+                    Enter again — {formatUsdc(tournament.entryFee)}
+                  </button>
+                )
+              : (
                 <button
-                  onClick={() => setEntryOpen(true)}
-                  className="btn-sheen font-display flex min-h-12 w-full items-center justify-center rounded-full text-sm font-bold text-coin-text shadow-glow transition-shadow hover:shadow-[0_0_28px_rgba(239,159,39,0.5)]"
+                  onClick={() => window.location.reload()}
+                  className="font-display flex min-h-12 w-full items-center justify-center rounded-full bg-accent text-sm font-bold text-background transition-colors hover:bg-accent-hover"
                 >
-                  Enter again — {formatUsdc(tournament.entryFee)}
+                  Refresh
                 </button>
               )}
-              <Link
-                href="/"
-                className="font-display flex min-h-12 w-full items-center justify-center rounded-full border border-edge text-sm font-semibold text-secondary transition-colors hover:border-accent/50 hover:text-white"
-              >
-                Back to lobby
-              </Link>
-            </div>
-          ) : (
-            <div className="mt-5 flex gap-2.5">
-              <Link
-                href="/"
-                className="flex min-h-12 flex-1 items-center justify-center rounded-btn bg-accent text-sm font-bold text-background transition-colors hover:bg-accent-hover"
-              >
-                Back to lobby
-              </Link>
-              <button
-                onClick={() => {
-                  startingRef.current = false;
-                  setStartFailure(null);
-                }}
-                className="flex min-h-12 flex-1 items-center justify-center rounded-btn border text-sm font-semibold text-secondary transition-colors hover:border-accent/50 hover:text-white"
-              >
-                Retry
-              </button>
-            </div>
-          )}
+            <Link
+              href="/"
+              className="font-display flex min-h-12 w-full items-center justify-center rounded-full border border-edge text-sm font-semibold text-secondary transition-colors hover:border-accent/50 hover:text-white"
+            >
+              Back to lobby
+            </Link>
+          </div>
         </div>
 
-        {/* Re-entry without leaving /play: a fresh paid entry, then GameClient's
-            scan picks up the new tx and starts the next run in place. */}
         {entryOpen && tournament && tierId && (
-          <EntryFlow
-            tierId={tierId}
-            tournament={tournament}
-            redirectOnSuccess={false}
-            onEntered={() => {
-              startingRef.current = false;
-              setStartFailure(null);
-            }}
-            onClose={() => setEntryOpen(false)}
-          />
+          <EntryFlow tierId={tierId} tournament={tournament} onClose={() => setEntryOpen(false)} />
         )}
       </Screen>
     );
@@ -356,9 +313,7 @@ export function GameClient({ tournamentId }: { tournamentId: number }) {
     return (
       <Screen>
         <GardenLoader size={36} />
-        <p className="text-sm text-secondary">
-          {entryCount === undefined ? 'Checking your entry…' : 'Starting your game…'}
-        </p>
+        <p className="text-sm text-secondary">Verifying your entry…</p>
       </Screen>
     );
   }
@@ -438,6 +393,8 @@ export function GameClient({ tournamentId }: { tournamentId: number }) {
                 sessionId={sessionId}
                 tournamentId={tournamentId}
                 personalBest={personalBest}
+                entryFee={tournament?.entryFee}
+                onPlayAgain={() => setEntryOpen(true)}
               />
             )}
           </div>
@@ -462,6 +419,13 @@ export function GameClient({ tournamentId }: { tournamentId: number }) {
           <LiveLeaderboardPanel tournamentId={tournamentId} withInfo />
         </aside>
       </div>
+
+      {/* Re-entry from Game Over: a fresh paid entry, then the redirect to
+          /play?entryTx=… remounts this client (keyed on the tx) and starts the
+          next run. */}
+      {entryOpen && tournament && tierId && (
+        <EntryFlow tierId={tierId} tournament={tournament} onClose={() => setEntryOpen(false)} />
+      )}
 
       {/* Mobile: ranking slides up as a sheet */}
       <AnimatePresence>
